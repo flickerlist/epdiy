@@ -281,7 +281,7 @@ void epd_renderer_init(enum EpdInitOptions options) {
 
     ESP_LOGI("epd", "Space used for waveform LUT: %dK", lut_size / 1024);
     render_context.conversion_lut
-        = (uint8_t*)heap_caps_malloc(lut_size, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+        = (uint8_t*)heap_caps_malloc(lut_size, MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
     if (render_context.conversion_lut == NULL) {
         ESP_LOGE("epd", "could not allocate LUT!");
         abort();
