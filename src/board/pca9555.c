@@ -81,6 +81,24 @@ static esp_err_t pca9555_write_single(i2c_port_t port, int reg, uint8_t value) {
     return i2c_master_write_slave(port, reg, w_data, sizeof(w_data));
 }
 
+static esp_err_t pca9555_write_single_retry(i2c_port_t port, int reg, uint8_t value) {
+    esp_err_t err = ESP_FAIL;
+    int try_count = 1;
+    while (try_count <= 5) {
+        err = pca9555_write_single(port, reg, value);
+        if (err == ESP_OK) {
+            if (try_count > 1) {
+                ESP_LOGW("PCA9555", "pca9555_write_single. err: 0, try: %d", try_count);
+            }
+            break;
+        }
+        ESP_LOGE("PCA9555", "pca9555_write_single. err: %d, try: %d", err, try_count);
+        vTaskDelay(200 / portTICK_PERIOD_MS);
+        try_count++;
+    }
+    return err;
+}
+
 esp_err_t pca9555_set_config(i2c_port_t port, uint8_t config_value, int high_port) {
     return pca9555_write_single(port, REG_CONFIG_PORT0 + high_port, config_value);
 }
@@ -90,7 +108,7 @@ esp_err_t pca9555_set_inversion(i2c_port_t port, uint8_t config_value, int high_
 }
 
 esp_err_t pca9555_set_value(i2c_port_t port, uint8_t config_value, int high_port) {
-    return pca9555_write_single(port, REG_OUTPUT_PORT0 + high_port, config_value);
+    return pca9555_write_single_retry(port, REG_OUTPUT_PORT0 + high_port, config_value);
 }
 
 uint8_t pca9555_read_input(i2c_port_t i2c_port, int high_port) {
