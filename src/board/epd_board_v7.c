@@ -112,17 +112,17 @@ static lcd_bus_config_t lcd_config = {
 static void epd_board_init(uint32_t epd_row_width) {
     gpio_hold_dis(CKH);  // free CKH after wakeup
 
-    i2c_config_t conf;
-    conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = CFG_SDA;
-    conf.scl_io_num = CFG_SCL;
-    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.master.clk_speed = 100000;
-    conf.clk_flags = 0;
-    ESP_ERROR_CHECK(i2c_param_config(EPDIY_I2C_PORT, &conf));
+    // i2c_config_t conf;
+    // conf.mode = I2C_MODE_MASTER;
+    // conf.sda_io_num = CFG_SDA;
+    // conf.scl_io_num = CFG_SCL;
+    // conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
+    // conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
+    // conf.master.clk_speed = 100000;
+    // conf.clk_flags = 0;
+    // ESP_ERROR_CHECK(i2c_param_config(EPDIY_I2C_PORT, &conf));
 
-    ESP_ERROR_CHECK(i2c_driver_install(EPDIY_I2C_PORT, I2C_MODE_MASTER, 0, 0, 0));
+    // ESP_ERROR_CHECK(i2c_driver_install(EPDIY_I2C_PORT, I2C_MODE_MASTER, 0, 0, 0));
 
     config_reg.port = EPDIY_I2C_PORT;
     config_reg.pwrup = false;
@@ -135,7 +135,7 @@ static void epd_board_init(uint32_t epd_row_width) {
     gpio_set_direction(CFG_INTR, GPIO_MODE_INPUT);
     gpio_set_intr_type(CFG_INTR, GPIO_INTR_NEGEDGE);
 
-    ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_EDGE));
+    // ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_EDGE));
 
     ESP_ERROR_CHECK(gpio_isr_handler_add(CFG_INTR, interrupt_handler, (void*)CFG_INTR));
 
