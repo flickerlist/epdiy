@@ -1,5 +1,6 @@
 #include "render_context.h"
 
+#include <string.h>
 #include "esp_log.h"
 
 #include "../epdiy.h"
@@ -12,39 +13,6 @@ const static int DEFAULT_FRAME_TIME = 120;
 
 static inline int min(int x, int y) {
     return x < y ? x : y;
-}
-
-lut_func_t get_lut_function(RenderContext_t* ctx) {
-    const enum EpdDrawMode mode = ctx->mode;
-    if (mode & MODE_PACKING_2PPB) {
-        if (ctx->conversion_lut_size == 1024) {
-            if (mode & PREVIOUSLY_WHITE) {
-                return &calc_epd_input_4bpp_1k_lut_white;
-            } else if (mode & PREVIOUSLY_BLACK) {
-                return &calc_epd_input_4bpp_1k_lut_black;
-            } else {
-                ctx->error |= EPD_DRAW_LOOKUP_NOT_IMPLEMENTED;
-            }
-        } else if (ctx->conversion_lut_size == (1 << 16)) {
-            return &calc_epd_input_4bpp_lut_64k;
-        } else {
-            ctx->error |= EPD_DRAW_LOOKUP_NOT_IMPLEMENTED;
-        }
-    } else if (mode & MODE_PACKING_1PPB_DIFFERENCE) {
-#ifdef RENDER_METHOD_LCD
-        return &calc_epd_input_1ppB_1k_S3_VE;
-#endif
-
-        if (ctx->conversion_lut_size == (1 << 16)) {
-            return &calc_epd_input_1ppB_64k;
-        }
-        return NULL;
-    } else if (mode & MODE_PACKING_8PPB) {
-        return &calc_epd_input_1bpp;
-    } else {
-        ctx->error |= EPD_DRAW_LOOKUP_NOT_IMPLEMENTED;
-    }
-    return NULL;
 }
 
 void get_buffer_params(
@@ -111,14 +79,28 @@ void IRAM_ATTR prepare_context_for_next_frame(RenderContext_t* ctx) {
     }
     ctx->frame_time = frame_time;
 
-    enum EpdDrawMode mode = ctx->mode;
     const EpdWaveformPhases* phases
         = ctx->waveform->mode_data[ctx->waveform_index]->range_data[ctx->waveform_range];
 
-    ctx->error |= calculate_lut(
-        ctx->conversion_lut, ctx->conversion_lut_size, mode, ctx->current_frame, phases
-    );
+    assert(ctx->lut_build_func != NULL);
+    ctx->lut_build_func(ctx->conversion_lut, phases, ctx->current_frame);
 
     ctx->lines_prepared = 0;
     ctx->lines_consumed = 0;
+}
+
+void epd_populate_line_mask(uint8_t* line_mask, const uint8_t* dirty_columns, int mask_len) {
+    if (dirty_columns == NULL) {
+        memset(line_mask, 0xFF, mask_len);
+    } else {
+        int pixels = mask_len * 4;
+        for (int c = 0; c < pixels / 2; c += 2) {
+            uint8_t mask = 0;
+            mask |= (dirty_columns[c + 1] & 0xF0) != 0 ? 0xC0 : 0x00;
+            mask |= (dirty_columns[c + 1] & 0x0F) != 0 ? 0x30 : 0x00;
+            mask |= (dirty_columns[c] & 0xF0) != 0 ? 0x0C : 0x00;
+            mask |= (dirty_columns[c] & 0x0F) != 0 ? 0x03 : 0x00;
+            line_mask[c / 2] = mask;
+        }
+    }
 }

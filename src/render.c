@@ -88,29 +88,6 @@ static inline int rounded_display_height() {
     return (((epd_height() + 7) / 8) * 8);
 }
 
-/**
- * Populate an output line mask from line dirtyness with one nibble per pixel.
- * If the dirtyness data is NULL, set the mask to neutral.
- *
- * don't inline for to ensure availability in tests.
- */
-void __attribute__((noinline))
-_epd_populate_line_mask(uint8_t* line_mask, const uint8_t* dirty_columns, int mask_len) {
-    if (dirty_columns == NULL) {
-        memset(line_mask, 0xFF, mask_len);
-    } else {
-        int pixels = mask_len * 4;
-        for (int c = 0; c < pixels / 2; c += 2) {
-            uint8_t mask = 0;
-            mask |= (dirty_columns[c + 1] & 0xF0) != 0 ? 0xC0 : 0x00;
-            mask |= (dirty_columns[c + 1] & 0x0F) != 0 ? 0x30 : 0x00;
-            mask |= (dirty_columns[c] & 0xF0) != 0 ? 0x0C : 0x00;
-            mask |= (dirty_columns[c] & 0x0F) != 0 ? 0x03 : 0x00;
-            line_mask[c / 2] = mask;
-        }
-    }
-}
-
 // FIXME: fix misleading naming:
 //  area -> buffer dimensions
 //  crop -> area taken out of buffer
@@ -170,6 +147,12 @@ enum EpdDrawError IRAM_ATTR epd_draw_base(
     }
 #endif
 
+    LutFunctionPair lut_functions = find_lut_functions(mode, render_context.conversion_lut_size);
+    if (lut_functions.build_func == NULL || lut_functions.lookup_func == NULL) {
+        ESP_LOGE("epdiy", "no output lookup method found for your mode and LUT size!");
+        return EPD_DRAW_LOOKUP_NOT_IMPLEMENTED;
+    }
+
     render_context.area = area;
     render_context.crop_to = crop_to;
     render_context.waveform_range = waveform_range;
@@ -179,6 +162,8 @@ enum EpdDrawError IRAM_ATTR epd_draw_base(
     render_context.error = EPD_DRAW_SUCCESS;
     render_context.drawn_lines = drawn_lines;
     render_context.data_ptr = data;
+    render_context.lut_build_func = lut_functions.build_func;
+    render_context.lut_lookup_func = lut_functions.lookup_func;
 
     render_context.lines_prepared = 0;
     render_context.lines_consumed = 0;
@@ -190,14 +175,13 @@ enum EpdDrawError IRAM_ATTR epd_draw_base(
         render_context.phase_times = waveform_phases->phase_times;
     }
 
+    epd_populate_line_mask(
+        render_context.line_mask, drawn_columns, render_context.display_width / 4
+    );
+
 #ifdef RENDER_METHOD_I2S
     i2s_do_update(&render_context);
 #elif defined(RENDER_METHOD_LCD)
-    for (int i = 0; i < NUM_RENDER_THREADS; i++) {
-        LineQueue_t* queue = &render_context.line_queues[i];
-        _epd_populate_line_mask(queue->mask_buffer, drawn_columns, queue->mask_buffer_len);
-    }
-
     lcd_do_update(&render_context);
 #endif
 
@@ -287,6 +271,7 @@ void epd_renderer_init(enum EpdInitOptions options) {
         abort();
     }
     render_context.conversion_lut_size = lut_size;
+    render_context.static_line_buffer = NULL;
 
     render_context.frame_done = xSemaphoreCreateBinary();
 
@@ -312,16 +297,18 @@ void epd_renderer_init(enum EpdInitOptions options) {
         abort();
     }
 
+    render_context.line_mask
+        = heap_caps_aligned_alloc(16, epd_width() / 4, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+    assert(render_context.line_mask != NULL);
+
 #ifdef RENDER_METHOD_LCD
-    bool use_lq_mask = true;
     size_t queue_elem_size = render_context.display_width / 4;
 #elif defined(RENDER_METHOD_I2S)
-    bool use_lq_mask = false;
-    size_t queue_elem_size = epd_width();
+    size_t queue_elem_size = render_context.display_width;
 #endif
 
     for (int i = 0; i < NUM_RENDER_THREADS; i++) {
-        render_context.line_queues[i] = lq_init(queue_len, queue_elem_size, use_lq_mask);
+        render_context.line_queues[i] = lq_init(queue_len, queue_elem_size);
         render_context.feed_line_buffers[i] = (uint8_t*)heap_caps_malloc(
             render_context.display_width, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL
         );
@@ -362,6 +349,7 @@ void epd_renderer_deinit() {
 
     heap_caps_free(render_context.conversion_lut);
     heap_caps_free(render_context.line_threads);
+    heap_caps_free(render_context.line_mask);
     vSemaphoreDelete(render_context.frame_done);
 }
 

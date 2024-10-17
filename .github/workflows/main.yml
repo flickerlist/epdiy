@@ -6,7 +6,7 @@ jobs:
   format-check:
     runs-on: ubuntu-latest
     container:
-      image: "espressif/idf:release-v5.2"
+      image: "espressif/idf:release-v5.3"
     steps:
       - uses: actions/checkout@v4
       - run: |
@@ -25,6 +25,7 @@ jobs:
           - release-v4.4
           - release-v5.1
           - release-v5.2
+          - release-v5.3
         example:
           - calibration_helper
           - demo
