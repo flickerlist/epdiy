@@ -7,7 +7,7 @@
 static const adc1_channel_t channel = ADC1_CHANNEL_7;
 static esp_adc_cal_characteristics_t adc_chars;
 
-SemaphoreHandle_t _epdiy_i2c_semaphore;
+SemaphoreHandle_t _epdiy_i2c_semaphore = NULL;
 
 #define NUMBER_OF_SAMPLES 100
 
@@ -38,6 +38,11 @@ float epd_board_ambient_temperature_v2() {
 
 void epd_init_i2c_semaphore() {
   _epdiy_i2c_semaphore = xSemaphoreCreateMutex();
+  if (_epdiy_i2c_semaphore) {
+    xSemaphoreGive(_epdiy_i2c_semaphore);
+  } else {
+    ESP_LOGE("epdiy", "Failed to create i2c semaphore");
+  }
 }
 
 SemaphoreHandle_t epd_get_i2c_semaphore() {
