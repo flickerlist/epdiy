@@ -2,9 +2,12 @@
 #include "epd_board.h"
 #include "esp_adc_cal.h"
 #include "esp_log.h"
+#include "epd_board_common.h"
 
 static const adc1_channel_t channel = ADC1_CHANNEL_7;
 static esp_adc_cal_characteristics_t adc_chars;
+
+SemaphoreHandle_t _epdiy_i2c_semaphore;
 
 #define NUMBER_OF_SAMPLES 100
 
@@ -31,4 +34,12 @@ float epd_board_ambient_temperature_v2() {
     // voltage in mV
     float voltage = esp_adc_cal_raw_to_voltage(value, &adc_chars);
     return (voltage - 500.0) / 10.0;
+}
+
+void epd_init_i2c_semaphore() {
+  _epdiy_i2c_semaphore = xSemaphoreCreateMutex();
+}
+
+SemaphoreHandle_t epd_get_i2c_semaphore() {
+  return _epdiy_i2c_semaphore;
 }

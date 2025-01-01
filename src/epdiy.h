@@ -13,6 +13,7 @@ extern "C" {
 #include <stdint.h>
 
 #include "epd_internals.h"
+#include "board/epd_board_common.h"
 
 /// An area on the display.
 typedef struct {
