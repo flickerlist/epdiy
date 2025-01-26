@@ -488,7 +488,6 @@ void epd_init(
     const EpdBoardDefinition* board, const EpdDisplay_t* disp, enum EpdInitOptions options
 ) {
     display = disp;
-    epd_init_i2c_semaphore();
     epd_set_board(board);
     epd_renderer_init(options);
 }

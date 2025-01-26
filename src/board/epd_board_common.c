@@ -36,13 +36,8 @@ float epd_board_ambient_temperature_v2() {
     return (voltage - 500.0) / 10.0;
 }
 
-void epd_init_i2c_semaphore() {
-  _epdiy_i2c_semaphore = xSemaphoreCreateMutex();
-  if (_epdiy_i2c_semaphore) {
-    xSemaphoreGive(_epdiy_i2c_semaphore);
-  } else {
-    ESP_LOGE("epdiy", "Failed to create i2c semaphore");
-  }
+void epd_set_i2c_semaphore(SemaphoreHandle_t i2c_semaphore ) {
+  _epdiy_i2c_semaphore = i2c_semaphore;
 }
 
 SemaphoreHandle_t epd_get_i2c_semaphore() {

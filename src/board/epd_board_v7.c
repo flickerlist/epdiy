@@ -220,7 +220,12 @@ static void epd_board_poweron(epd_ctrl_state_t* state) {
     // give the IC time to powerup and set lines
     vTaskDelay(1);
 
+    int64_t start_time = esp_timer_get_time();
     while (!(pca9555_read_input(config_reg.port, 1) & CFG_PIN_PWRGOOD)) {
+        // This may lead to an endless loop, so add time limit to restart
+        if (esp_timer_get_time() - start_time > 10 * 1000 * 1000) {  // 10s
+            esp_restart();
+        }
     }
 
     ESP_ERROR_CHECK(tps_write_register(config_reg.port, TPS_REG_ENABLE, 0x3F));

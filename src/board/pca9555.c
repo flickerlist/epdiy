@@ -23,7 +23,9 @@ static esp_err_t i2c_master_read_slave(i2c_port_t i2c_num, uint8_t* data_rd, siz
     if (size == 0) {
         return ESP_OK;
     }
-    xSemaphoreTake(epd_get_i2c_semaphore(), portMAX_DELAY);
+    if (epd_get_i2c_semaphore()) {
+        xSemaphoreTake(epd_get_i2c_semaphore(), portMAX_DELAY);
+    }
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     if (cmd == NULL) {
         ESP_LOGE("epdiy", "insufficient memory for I2C transaction");
@@ -35,7 +37,9 @@ static esp_err_t i2c_master_read_slave(i2c_port_t i2c_num, uint8_t* data_rd, siz
 
     esp_err_t ret = i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_PERIOD_MS);
     if (ret != ESP_OK) {
-        xSemaphoreGive(epd_get_i2c_semaphore());
+        if (epd_get_i2c_semaphore()) {
+            xSemaphoreGive(epd_get_i2c_semaphore());
+        }
         return ret;
     }
     i2c_cmd_link_delete(cmd);
@@ -54,19 +58,24 @@ static esp_err_t i2c_master_read_slave(i2c_port_t i2c_num, uint8_t* data_rd, siz
 
     ret = i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_PERIOD_MS);
     if (ret != ESP_OK) {
-        xSemaphoreGive(epd_get_i2c_semaphore());
+        if (epd_get_i2c_semaphore()) {
+            xSemaphoreGive(epd_get_i2c_semaphore());
+        }
         return ret;
     }
     i2c_cmd_link_delete(cmd);
-    xSemaphoreGive(epd_get_i2c_semaphore());
-
+    if (epd_get_i2c_semaphore()) {
+        xSemaphoreGive(epd_get_i2c_semaphore());
+    }
     return ESP_OK;
 }
 
 static esp_err_t i2c_master_write_slave(
     i2c_port_t i2c_num, uint8_t ctrl, uint8_t* data_wr, size_t size
 ) {
-    xSemaphoreTake(epd_get_i2c_semaphore(), portMAX_DELAY);
+    if (epd_get_i2c_semaphore()) {
+        xSemaphoreTake(epd_get_i2c_semaphore(), portMAX_DELAY);
+    }
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     if (cmd == NULL) {
         ESP_LOGE("epdiy", "insufficient memory for I2C transaction");
@@ -79,7 +88,9 @@ static esp_err_t i2c_master_write_slave(
     i2c_master_stop(cmd);
     esp_err_t ret = i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_PERIOD_MS);
     i2c_cmd_link_delete(cmd);
-    xSemaphoreGive(epd_get_i2c_semaphore());
+    if (epd_get_i2c_semaphore()) {
+        xSemaphoreGive(epd_get_i2c_semaphore());
+    }
     return ret;
 }
 
