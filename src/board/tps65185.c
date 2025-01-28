@@ -5,11 +5,15 @@
 
 #include <driver/i2c.h>
 #include <stdint.h>
+#include "epd_board_common.h"
 
 static const int EPDIY_TPS_ADDR = 0x68;
 
 static uint8_t i2c_master_read_slave(i2c_port_t i2c_num, int reg) {
     uint8_t r_data[1];
+    if (epd_get_i2c_semaphore()) {
+        xSemaphoreTake(epd_get_i2c_semaphore(), portMAX_DELAY);
+    }
 
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     i2c_master_start(cmd);
@@ -34,12 +38,18 @@ static uint8_t i2c_master_read_slave(i2c_port_t i2c_num, int reg) {
     ESP_ERROR_CHECK(i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_PERIOD_MS));
     i2c_cmd_link_delete(cmd);
 
+    if (epd_get_i2c_semaphore()) {
+        xSemaphoreGive(epd_get_i2c_semaphore());
+    }
     return r_data[0];
 }
 
 static esp_err_t i2c_master_write_slave(
     i2c_port_t i2c_num, uint8_t ctrl, uint8_t* data_wr, size_t size
 ) {
+    if (epd_get_i2c_semaphore()) {
+        xSemaphoreTake(epd_get_i2c_semaphore(), portMAX_DELAY);
+    }
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     i2c_master_start(cmd);
     i2c_master_write_byte(cmd, (EPDIY_TPS_ADDR << 1) | I2C_MASTER_WRITE, true);
@@ -49,6 +59,9 @@ static esp_err_t i2c_master_write_slave(
     i2c_master_stop(cmd);
     esp_err_t ret = i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_PERIOD_MS);
     i2c_cmd_link_delete(cmd);
+    if (epd_get_i2c_semaphore()) {
+        xSemaphoreGive(epd_get_i2c_semaphore());
+    }
     return ret;
 }
 
