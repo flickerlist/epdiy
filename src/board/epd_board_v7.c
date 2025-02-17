@@ -224,6 +224,7 @@ static void epd_board_poweron(epd_ctrl_state_t* state) {
     while (!(pca9555_read_input(config_reg.port, 1) & CFG_PIN_PWRGOOD)) {
         // This may lead to an endless loop, so add time limit to restart
         if (esp_timer_get_time() - start_time > 10 * 1000 * 1000) {  // 10s
+            ets_printf("epdiy: epd_board_poweron failed, restarting...\n");
             esp_restart();
         }
     }
