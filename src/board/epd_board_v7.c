@@ -135,7 +135,7 @@ static void epd_board_init(uint32_t epd_row_width) {
     gpio_set_direction(CFG_INTR, GPIO_MODE_INPUT);
     gpio_set_intr_type(CFG_INTR, GPIO_INTR_NEGEDGE);
 
-    ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_EDGE));
+    // ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_EDGE));
 
     ESP_ERROR_CHECK(gpio_isr_handler_add(CFG_INTR, interrupt_handler, (void*)CFG_INTR));
 
