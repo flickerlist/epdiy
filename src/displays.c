@@ -18,6 +18,15 @@ const EpdDisplay_t ED060XC3 = {
     .display_type = DISPLAY_TYPE_GENERIC,
 };
 
+const EpdDisplay_t ED060XC3_2 = {
+  .width = 1024,
+  .height = 758,
+  .bus_width = 8,
+  .bus_speed = 20,
+  .default_waveform = &epdiy_ED047TC2,
+  .display_type = DISPLAY_TYPE_GENERIC,
+};
+
 const EpdDisplay_t ED097OC4 = {
     .width = 1200,
     .height = 825,

@@ -25,10 +25,10 @@
 #define GPIO_NUM_48 -1
 #endif
 
-#define CFG_SCL GPIO_NUM_40
-#define CFG_SDA GPIO_NUM_39
+#define CFG_SCL GPIO_NUM_2
+#define CFG_SDA GPIO_NUM_14
 #define CFG_INTR GPIO_NUM_38
-#define EPDIY_I2C_PORT I2C_NUM_0
+#define EPDIY_I2C_PORT I2C_NUM_1
 
 #define CFG_PIN_OE (PCA_PIN_PC10 >> 8)
 #define CFG_PIN_MODE (PCA_PIN_PC11 >> 8)
@@ -58,7 +58,7 @@
 #define D0 GPIO_NUM_5
 
 /* Control Lines */
-#define CKV GPIO_NUM_48
+#define CKV GPIO_NUM_46
 #define STH GPIO_NUM_41
 #define LEH GPIO_NUM_42
 #define STV GPIO_NUM_45
