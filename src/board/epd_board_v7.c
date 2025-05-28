@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "pca9555.h"
 #include "tps65185.h"
+#include "esp_timer.h"
 
 #include <driver/gpio.h>
 #include <driver/i2c.h>
@@ -200,7 +201,7 @@ static void epd_board_set_ctrl(epd_ctrl_state_t* state, const epd_ctrl_state_t* 
         ESP_ERROR_CHECK(pca9555_set_value(config_reg.port, value, 1));
     }
 }
-
+static void epd_board_poweroff(epd_ctrl_state_t* state);
 static void epd_board_poweron(epd_ctrl_state_t* state) {
     epd_ctrl_state_t mask = {
         .ep_output_enable = true,
@@ -220,7 +221,46 @@ static void epd_board_poweron(epd_ctrl_state_t* state) {
     // give the IC time to powerup and set lines
     vTaskDelay(1);
 
+    int64_t start = esp_timer_get_time();
+    int64_t failed_count = 0;
     while (!(pca9555_read_input(config_reg.port, 1) & CFG_PIN_PWRGOOD)) {
+        int64_t _cur = esp_timer_get_time();
+        if (_cur - start > 1 * 1000 * 1000) { // 1s
+            start  = _cur;
+            failed_count ++;
+
+            if (failed_count >= 3) {
+                // poweron failed
+                ets_printf("\nepdiy epd_board_poweron failed [finally] !!!\n");
+                return;
+            }
+            ets_printf("\nepdiy epd_board_poweron failed [once], core: %d retry...\n", xPortGetCoreID());
+
+            /// retry poweron
+            
+            epd_board_poweroff(state);
+
+            // copy upper code of poweron
+            epd_ctrl_state_t mask = {
+                .ep_output_enable = true,
+                .ep_mode = true,
+                .ep_stv = true,
+            };
+            state->ep_stv = true;
+            state->ep_mode = false;
+            state->ep_output_enable = true;
+            config_reg.wakeup = true;
+            epd_board_set_ctrl(state, &mask);
+            config_reg.pwrup = true;
+            epd_board_set_ctrl(state, &mask);
+            config_reg.vcom_ctrl = true;
+            epd_board_set_ctrl(state, &mask);
+
+            // give the IC time to powerup and set lines
+            vTaskDelay(1 / portTICK_PERIOD_MS);
+        } else {
+            vTaskDelay(1 / portTICK_PERIOD_MS);
+        }
     }
 
     ESP_ERROR_CHECK(tps_write_register(config_reg.port, TPS_REG_ENABLE, 0x3F));
