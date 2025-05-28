@@ -43,3 +43,7 @@ void epd_set_i2c_semaphore(SemaphoreHandle_t i2c_semaphore ) {
 SemaphoreHandle_t epd_get_i2c_semaphore() {
   return _epdiy_i2c_semaphore;
 }
+
+int epd_get_board_vesion() {
+    return 2;
+}
