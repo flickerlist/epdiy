@@ -32,3 +32,16 @@ float epd_board_ambient_temperature_v2() {
     float voltage = esp_adc_cal_raw_to_voltage(value, &adc_chars);
     return (voltage - 500.0) / 10.0;
 }
+
+/**
+ * do nothing for new boards 
+ */
+void epd_set_i2c_semaphore(SemaphoreHandle_t i2c_semaphore) {
+}
+
+/**
+ * match nartick version, ignore version not match crashing
+ */
+int epd_get_board_vesion() {
+    return 3;
+}

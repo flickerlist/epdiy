@@ -11,6 +11,8 @@
 #include <esp_err.h>
 #include <xtensa/core-macros.h>
 
+#include "board/epd_board_common.h"
+
 /**
  * State of display control pins.
  */
