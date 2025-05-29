@@ -43,7 +43,7 @@ typedef struct {
     /**
      * Enable power to the display.
      */
-    void (*poweron)(epd_ctrl_state_t*);
+    bool (*poweron)(epd_ctrl_state_t*);
 
     /**
      * Measure VCOM kick-back. Only in v6 & v7 boards!

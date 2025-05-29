@@ -202,7 +202,7 @@ static void epd_board_set_ctrl(epd_ctrl_state_t* state, const epd_ctrl_state_t* 
     }
 }
 static void epd_board_poweroff(epd_ctrl_state_t* state);
-static void epd_board_poweron(epd_ctrl_state_t* state) {
+static bool epd_board_poweron(epd_ctrl_state_t* state) {
     epd_ctrl_state_t mask = {
         .ep_output_enable = true,
         .ep_mode = true,
@@ -225,14 +225,14 @@ static void epd_board_poweron(epd_ctrl_state_t* state) {
     int64_t failed_count = 0;
     while (!(pca9555_read_input(config_reg.port, 1) & CFG_PIN_PWRGOOD)) {
         int64_t _cur = esp_timer_get_time();
-        if (_cur - start > 1 * 1000 * 1000) { // 1s
+        if (_cur - start > 700 * 1000) { // 700ms
             start  = _cur;
             failed_count ++;
 
             if (failed_count >= 3) {
                 // poweron failed
                 ets_printf("\nepdiy epd_board_poweron failed [finally] !!!\n");
-                return;
+                return false;
             }
             ets_printf("\nepdiy epd_board_poweron failed [once], core: %d retry...\n", xPortGetCoreID());
 
@@ -281,11 +281,12 @@ static void epd_board_poweron(epd_ctrl_state_t* state) {
                 "Power enable failed! PG status: %X",
                 tps_read_register(config_reg.port, TPS_REG_PG)
             );
-            return;
+            return false;
         }
         tries++;
         vTaskDelay(1);
     }
+    return true;
 }
 
 static void epd_board_measure_vcom(epd_ctrl_state_t* state) {
