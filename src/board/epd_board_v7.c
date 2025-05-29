@@ -201,7 +201,8 @@ static void epd_board_set_ctrl(epd_ctrl_state_t* state, const epd_ctrl_state_t* 
     }
 }
 
-static void epd_board_poweron(epd_ctrl_state_t* state) {
+static void epd_board_poweroff(epd_ctrl_state_t* state);
+static bool epd_board_poweron(epd_ctrl_state_t* state) {
     epd_ctrl_state_t mask = {
         .ep_output_enable = true,
         .ep_mode = true,
@@ -220,12 +221,45 @@ static void epd_board_poweron(epd_ctrl_state_t* state) {
     // give the IC time to powerup and set lines
     vTaskDelay(1);
 
-    int64_t start_time = esp_timer_get_time();
+    int64_t start = esp_timer_get_time();
+    int64_t failed_count = 0;
     while (!(pca9555_read_input(config_reg.port, 1) & CFG_PIN_PWRGOOD)) {
-        // This may lead to an endless loop, so add time limit to restart
-        if (esp_timer_get_time() - start_time > 10 * 1000 * 1000) {  // 10s
-            ets_printf("epdiy: epd_board_poweron failed, restarting...\n");
-            esp_restart();
+        int64_t _cur = esp_timer_get_time();
+        if (_cur - start > 1 * 700 * 1000) { // 700ms
+            start  = _cur;
+            failed_count ++;
+
+            if (failed_count >= 3) {
+                // poweron failed
+                ets_printf("\nepdiy epd_board_poweron failed [finally] !!!\n");
+                return false;
+            }
+            ets_printf("\nepdiy epd_board_poweron failed [once], core: %d retry...\n", xPortGetCoreID());
+
+            /// retry poweron
+            
+            epd_board_poweroff(state);
+
+            // copy upper code of poweron
+            epd_ctrl_state_t mask = {
+                .ep_output_enable = true,
+                .ep_mode = true,
+                .ep_stv = true,
+            };
+            state->ep_stv = true;
+            state->ep_mode = false;
+            state->ep_output_enable = true;
+            config_reg.wakeup = true;
+            epd_board_set_ctrl(state, &mask);
+            config_reg.pwrup = true;
+            epd_board_set_ctrl(state, &mask);
+            config_reg.vcom_ctrl = true;
+            epd_board_set_ctrl(state, &mask);
+
+            // give the IC time to powerup and set lines
+            vTaskDelay(1 / portTICK_PERIOD_MS);
+        } else {
+            vTaskDelay(1 / portTICK_PERIOD_MS);
         }
     }
 
@@ -247,11 +281,12 @@ static void epd_board_poweron(epd_ctrl_state_t* state) {
                 "Power enable failed! PG status: %X",
                 tps_read_register(config_reg.port, TPS_REG_PG)
             );
-            return;
+            return false;
         }
         tries++;
         vTaskDelay(1);
     }
+    return true;
 }
 
 static void epd_board_poweroff(epd_ctrl_state_t* state) {

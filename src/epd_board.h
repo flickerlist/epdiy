@@ -41,7 +41,7 @@ typedef struct {
     /**
      * Enable power to the display.
      */
-    void (*poweron)(epd_ctrl_state_t*);
+    bool (*poweron)(epd_ctrl_state_t*);
     /**
      * Disable power to the display.
      */

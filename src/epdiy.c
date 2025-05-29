@@ -476,8 +476,8 @@ void epd_draw_rotated_image(EpdRect image_area, const uint8_t* image_buffer, uin
     }
 }
 
-void epd_poweron() {
-    epd_current_board()->poweron(epd_ctrl_state());
+bool epd_poweron() {
+    return epd_current_board()->poweron(epd_ctrl_state());
 }
 
 void epd_poweroff() {
