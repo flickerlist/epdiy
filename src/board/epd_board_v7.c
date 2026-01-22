@@ -257,9 +257,9 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
             epd_board_set_ctrl(state, &mask);
 
             // give the IC time to powerup and set lines
-            vTaskDelay(1 / portTICK_PERIOD_MS);
+            vTaskDelay(1);
         } else {
-            vTaskDelay(1 / portTICK_PERIOD_MS);
+            vTaskDelay(1);
         }
     }
 
