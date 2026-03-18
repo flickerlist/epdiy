@@ -185,7 +185,20 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
     assert(area.width == ctx->display_width && area.x == 0 && !ctx->error);
 
     // index of the line that triggers the frame output when processed
+    // must start output before producer queues can become full, otherwise
+    // lq_current() can spin forever waiting for free slots.
     int trigger_line = int_min(63, max_y - min_y);
+    int q_capacity = lq->size - 1;  // ring queue reserves one slot
+    // Trigger must be bounded by per-thread queue capacity. Scheduler skew can
+    // let one producer fill its own queue long before total prepared lines hit
+    // a cross-thread threshold.
+    int safe_trigger_max = q_capacity - 2;
+    if (safe_trigger_max < 0) {
+        safe_trigger_max = 0;
+    }
+    if (trigger_line > safe_trigger_max) {
+        trigger_line = safe_trigger_max;
+    }
 
     while (l = atomic_fetch_add(&ctx->lines_prepared, 1), l < ctx->lines_total) {
         ctx->line_threads[l] = thread_id;
