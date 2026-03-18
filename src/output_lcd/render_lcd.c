@@ -25,12 +25,18 @@ retrieve_line_isr(RenderContext_t* ctx, uint8_t* buf) {
     if (ctx->lines_consumed >= ctx->lines_total) {
         return false;
     }
-    int thread = ctx->line_threads[ctx->lines_consumed];
-    assert(thread < NUM_RENDER_THREADS);
-
-    LineQueue_t* lq = &ctx->line_queues[thread];
 
     BaseType_t awoken = pdFALSE;
+
+    int thread = ctx->line_threads[ctx->lines_consumed];
+    if (thread >= NUM_RENDER_THREADS) {
+        ctx->error |= EPD_DRAW_EMPTY_LINE_QUEUE;
+        memset(buf, 0x00, ctx->display_width / 4);
+        ctx->lines_consumed += 1;
+        return awoken;
+    }
+
+    LineQueue_t* lq = &ctx->line_queues[thread];
 
     if (lq_read(lq, buf) != 0) {
         ctx->error |= EPD_DRAW_EMPTY_LINE_QUEUE;
@@ -167,7 +173,10 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
 
     // if there is an error, start the frame but don't feed data.
     if (ctx->error) {
-        memset(ctx->line_threads, 0, ctx->lines_total);
+        for (int i = 0; i < NUM_RENDER_THREADS; i++) {
+            lq_reset(&ctx->line_queues[i]);
+        }
+        memset(ctx->line_threads, 0xFF, ctx->lines_total);
         epd_lcd_line_source_cb((line_cb_func_t)&retrieve_line_isr, ctx);
         epd_lcd_start_frame();
         ESP_LOGW("epd_lcd", "draw frame draw initiated, but an error flag is set: %X", ctx->error);
