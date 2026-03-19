@@ -11,7 +11,10 @@
 
 #include <driver/gpio.h>
 #include <driver/i2c.h>
+#include <rom/ets_sys.h>
 #include <sdkconfig.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 // Make this compile von the ESP32 without ifdefing the whole file
 #ifndef CONFIG_IDF_TARGET_ESP32S3
@@ -74,6 +77,15 @@ typedef struct {
     bool wakeup;
     bool others[8];
 } epd_config_register_t;
+
+#define EPDIY_POWERON_STEP_DELAY_MS 10
+#define EPDIY_POWERON_POLL_DELAY_MS 10
+#define EPDIY_POWERON_PWRGOOD_TIMEOUT_MS 700
+#define EPDIY_POWERON_PG_TIMEOUT_MS 500
+
+static inline void epd_delay_ms(uint32_t ms) {
+    vTaskDelay(pdMS_TO_TICKS(ms));
+}
 
 /** The VCOM voltage to use. */
 static int vcom = 1600;
@@ -219,25 +231,21 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
     epd_board_set_ctrl(state, &mask);
 
     // give the IC time to powerup and set lines
-    vTaskDelay(1);
+    epd_delay_ms(EPDIY_POWERON_STEP_DELAY_MS);
 
     int64_t start = esp_timer_get_time();
     int64_t failed_count = 0;
     while (!(pca9555_read_input(config_reg.port, 1) & CFG_PIN_PWRGOOD)) {
         int64_t _cur = esp_timer_get_time();
-        if (_cur - start > 700 * 1000) { // 700ms
+        if (_cur - start > EPDIY_POWERON_PWRGOOD_TIMEOUT_MS * 1000LL) {
             start  = _cur;
             failed_count ++;
 
             if (failed_count >= 3) {
-                // poweron failed
-                ets_printf("\nepdiy epd_board_poweron failed [finally] !!!\n");
                 return false;
             }
-            ets_printf("\nepdiy epd_board_poweron failed [once], core: %d retry...\n", xPortGetCoreID());
 
             /// retry poweron
-            
             epd_board_poweroff(state);
 
             // copy upper code of poweron
@@ -257,9 +265,9 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
             epd_board_set_ctrl(state, &mask);
 
             // give the IC time to powerup and set lines
-            vTaskDelay(1);
+            epd_delay_ms(EPDIY_POWERON_STEP_DELAY_MS);
         } else {
-            vTaskDelay(1);
+            epd_delay_ms(EPDIY_POWERON_POLL_DELAY_MS);
         }
     }
 
@@ -275,16 +283,11 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
 
     int tries = 0;
     while (!((tps_read_register(config_reg.port, TPS_REG_PG) & 0xFA) == 0xFA)) {
-        if (tries >= 500) {
-            ESP_LOGE(
-                "epdiy",
-                "Power enable failed! PG status: %X",
-                tps_read_register(config_reg.port, TPS_REG_PG)
-            );
+        if (tries >= (EPDIY_POWERON_PG_TIMEOUT_MS / EPDIY_POWERON_POLL_DELAY_MS)) {
             return false;
         }
         tries++;
-        vTaskDelay(1);
+        epd_delay_ms(EPDIY_POWERON_POLL_DELAY_MS);
     }
     return true;
 }
