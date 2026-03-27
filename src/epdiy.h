@@ -251,7 +251,7 @@ int epd_rotated_display_height();
 void epd_deinit();
 
 /** Enable display power supply. */
-void epd_poweron();
+bool epd_poweron();
 
 /** Disable display power supply. */
 void epd_poweroff();
