@@ -13,6 +13,7 @@ extern "C" {
 #include <stdint.h>
 
 #include "epd_internals.h"
+#include "board/epd_board_common.h"
 
 /// An area on the display.
 typedef struct {
@@ -251,7 +252,7 @@ int epd_rotated_display_height();
 void epd_deinit();
 
 /** Enable display power supply. */
-void epd_poweron();
+bool epd_poweron();
 
 /** Disable display power supply. */
 void epd_poweroff();
