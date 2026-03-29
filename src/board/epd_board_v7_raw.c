@@ -195,7 +195,7 @@ static void epd_board_set_ctrl(epd_ctrl_state_t* state, const epd_ctrl_state_t* 
     }
 }
 
-static void epd_board_poweron(epd_ctrl_state_t* state) {
+static bool epd_board_poweron(epd_ctrl_state_t* state) {
     epd_ctrl_state_t mask = {
         .ep_output_enable = true,
         .ep_mode = true,
@@ -239,11 +239,12 @@ static void epd_board_poweron(epd_ctrl_state_t* state) {
                 "Power enable failed! PG status: %X",
                 tps_read_register(config_reg.port, TPS_REG_PG)
             );
-            return;
+            return false;
         }
         tries++;
         vTaskDelay(1);
     }
+    return true;
 }
 
 static void epd_board_poweroff(epd_ctrl_state_t* state) {
