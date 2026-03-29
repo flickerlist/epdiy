@@ -19,14 +19,59 @@
 
 // declare vector optimized line mask application.
 void epd_apply_line_mask_VE(uint8_t* line, const uint8_t* mask, int mask_len);
+static bool retrieve_line_isr(RenderContext_t* ctx, uint8_t* buf);
+
+static inline uint8_t IRAM_ATTR line_ready_load(RenderContext_t* ctx, int line) {
+    return __atomic_load_n(&ctx->line_ready[line], __ATOMIC_ACQUIRE);
+}
+
+static inline uint8_t IRAM_ATTR line_thread_load(RenderContext_t* ctx, int line) {
+    return __atomic_load_n(&ctx->line_threads[line], __ATOMIC_RELAXED);
+}
+
+static inline void IRAM_ATTR publish_line(RenderContext_t* ctx, int line, uint8_t thread_id) {
+    __atomic_store_n(&ctx->line_threads[line], thread_id, __ATOMIC_RELAXED);
+    __atomic_store_n(&ctx->line_ready[line], 1, __ATOMIC_RELEASE);
+}
+
+static inline bool IRAM_ATTR try_start_frame_once(RenderContext_t* ctx) {
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&ctx->frame_started, &expected, true)) {
+        return false;
+    }
+
+    epd_lcd_line_source_cb((line_cb_func_t)&retrieve_line_isr, ctx);
+    epd_lcd_start_frame();
+    return true;
+}
+
+static inline bool IRAM_ATTR ready_prefix_committed(RenderContext_t* ctx, int line_count) {
+    int limit = line_count < ctx->lines_total ? line_count : ctx->lines_total;
+    for (int i = 0; i < limit; i++) {
+        if (!line_ready_load(ctx, i)) {
+            return false;
+        }
+    }
+    return true;
+}
 
 __attribute__((optimize("O3"))) static bool IRAM_ATTR
 retrieve_line_isr(RenderContext_t* ctx, uint8_t* buf) {
     if (ctx->lines_consumed >= ctx->lines_total) {
         return false;
     }
-    int thread = ctx->line_threads[ctx->lines_consumed];
-    assert(thread < NUM_RENDER_THREADS);
+    if (!line_ready_load(ctx, ctx->lines_consumed)) {
+        ctx->error |= EPD_DRAW_EMPTY_LINE_QUEUE;
+        memset(buf, 0x00, ctx->display_width / 4);
+        return false;
+    }
+
+    int thread = line_thread_load(ctx, ctx->lines_consumed);
+    if (thread >= NUM_RENDER_THREADS) {
+        ctx->error |= EPD_DRAW_EMPTY_LINE_QUEUE;
+        memset(buf, 0x00, ctx->display_width / 4);
+        return false;
+    }
 
     LineQueue_t* lq = &ctx->line_queues[thread];
 
@@ -167,9 +212,7 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
 
     // if there is an error, start the frame but don't feed data.
     if (ctx->error) {
-        memset(ctx->line_threads, 0, ctx->lines_total);
-        epd_lcd_line_source_cb((line_cb_func_t)&retrieve_line_isr, ctx);
-        epd_lcd_start_frame();
+        try_start_frame_once(ctx);
         ESP_LOGW("epd_lcd", "draw frame draw initiated, but an error flag is set: %X", ctx->error);
         return;
     }
@@ -185,18 +228,10 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
     assert(area.width == ctx->display_width && area.x == 0 && !ctx->error);
 
     // index of the line that triggers the frame output when processed
-    int trigger_line = int_min(63, max_y - min_y);
+    // Start once we have enough lines to cover the two LCD bounce buffers.
+    int trigger_line = int_min(NUM_RENDER_THREADS * 4 - 1, max_y - min_y);
 
     while (l = atomic_fetch_add(&ctx->lines_prepared, 1), l < ctx->lines_total) {
-        ctx->line_threads[l] = thread_id;
-
-        // queue is sufficiently filled to fill both bounce buffers, frame
-        // can begin
-        if (l - min_y == trigger_line) {
-            epd_lcd_line_source_cb((line_cb_func_t)&retrieve_line_isr, ctx);
-            epd_lcd_start_frame();
-        }
-
         if (l < min_y || l >= max_y
             || (ctx->drawn_lines != NULL && !ctx->drawn_lines[l - area.y])) {
             uint8_t* buf = NULL;
@@ -212,6 +247,10 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
             }
             memset(buf, 0x00, lq->element_size);
             lq_commit(lq);
+            publish_line(ctx, l, thread_id);
+            if (l - min_y >= trigger_line && ready_prefix_committed(ctx, trigger_line + 1)) {
+                try_start_frame_once(ctx);
+            }
             continue;
         }
 
@@ -240,6 +279,10 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
         epd_apply_line_mask_VE(buf, ctx->line_mask, ctx->display_width / 4);
 
         lq_commit(lq);
+        publish_line(ctx, l, thread_id);
+        if (l - min_y >= trigger_line && ready_prefix_committed(ctx, trigger_line + 1)) {
+            try_start_frame_once(ctx);
+        }
     }
 }
 

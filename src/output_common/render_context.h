@@ -27,6 +27,7 @@ typedef struct {
     atomic_int lines_prepared;
     volatile int lines_consumed;
     int lines_total;
+    atomic_bool frame_started;
 
     /// frame currently in the current update cycle
     int current_frame;
@@ -68,6 +69,7 @@ typedef struct {
     /// one for each thread.
     LineQueue_t line_queues[NUM_RENDER_THREADS];
     uint8_t* line_threads;
+    uint8_t* line_ready;
 
     // Output line mask
     uint8_t* line_mask;

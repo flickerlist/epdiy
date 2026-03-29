@@ -284,6 +284,11 @@ void epd_renderer_init(enum EpdInitOptions options) {
     render_context.line_threads = (uint8_t*)heap_caps_malloc(
         rounded_display_height(), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL
     );
+    render_context.line_ready = (uint8_t*)heap_caps_malloc(
+        rounded_display_height(), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL
+    );
+    assert(render_context.line_threads != NULL);
+    assert(render_context.line_ready != NULL);
 
     int queue_len = 32;
     if (options & EPD_FEED_QUEUE_32) {
@@ -349,6 +354,7 @@ void epd_renderer_deinit() {
 
     heap_caps_free(render_context.conversion_lut);
     heap_caps_free(render_context.line_threads);
+    heap_caps_free(render_context.line_ready);
     heap_caps_free(render_context.line_mask);
     vSemaphoreDelete(render_context.frame_done);
 }
