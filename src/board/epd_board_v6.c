@@ -187,7 +187,7 @@ static void epd_board_set_ctrl(epd_ctrl_state_t* state, const epd_ctrl_state_t* 
     }
 }
 
-static void epd_board_poweron(epd_ctrl_state_t* state) {
+static bool epd_board_poweron(epd_ctrl_state_t* state) {
     i2s_gpio_attach(&i2s_config);
 
     epd_ctrl_state_t mask = {
@@ -221,7 +221,7 @@ static void epd_board_poweron(epd_ctrl_state_t* state) {
                 tps_read_register(config_reg.port, TPS_REG_INT1),
                 tps_read_register(config_reg.port, TPS_REG_INT2)
             );
-            return;
+            return false;
         }
         tries++;
         vTaskDelay(1);
@@ -244,11 +244,12 @@ static void epd_board_poweron(epd_ctrl_state_t* state) {
                 "Power enable failed! PG status: %X",
                 tps_read_register(config_reg.port, TPS_REG_PG)
             );
-            return;
+            return false;
         }
         tries++;
         vTaskDelay(1);
     }
+    return true;
 }
 
 static void epd_board_measure_vcom(epd_ctrl_state_t* state) {

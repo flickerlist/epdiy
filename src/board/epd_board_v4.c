@@ -126,7 +126,7 @@ static void epd_board_set_ctrl(epd_ctrl_state_t* state, const epd_ctrl_state_t* 
     }
 }
 
-static void epd_board_poweron(epd_ctrl_state_t* state) {
+static bool epd_board_poweron(epd_ctrl_state_t* state) {
     // POWERON
     i2s_gpio_attach(&i2s_config);
 
@@ -153,6 +153,7 @@ static void epd_board_poweron(epd_ctrl_state_t* state) {
     state->ep_sth = true;
     mask.ep_sth = true;
     epd_board_set_ctrl(state, &mask);
+    return true;
     // END POWERON
 }
 
