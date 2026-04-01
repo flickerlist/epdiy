@@ -6,6 +6,8 @@
 #include "esp_log.h"
 
 #include <driver/i2c.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <stdint.h>
 #include "epd_board_common.h"
 
@@ -114,7 +116,7 @@ void tps_vcom_kickback() {
     // this puts the VCOM pin in a high-impedance state.
     // bit 3 & 4 Number of acquisitions that is averaged to a single kick-back V. measurement
     tps_write_register(I2C_NUM_0, 4, 0x38);
-    vTaskDelay(1);
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     uint8_t int1reg = tps_read_register(I2C_NUM_0, TPS_REG_INT1);
     uint8_t vcomreg = tps_read_register(I2C_NUM_0, TPS_REG_VCOM2);
