@@ -4,6 +4,8 @@
 #include <esp_log.h>
 #include <sdkconfig.h>
 #include <stdint.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "../output_i2s/i2s_data_bus.h"
 #include "../output_i2s/render_i2s.h"
 #include "../output_i2s/rmt_pulse.h"
@@ -140,12 +142,12 @@ static void epd_board_deinit() {
             break;
         }
         tries++;
-        vTaskDelay(1);
+        vTaskDelay(pdMS_TO_TICKS(10));
         printf("%X\n", pca9555_read_input(config_reg.port, 1));
     }
     // Not sure why we need this delay, but the TPS65185 seems to generate an interrupt after some
     // time that needs to be cleared.
-    vTaskDelay(500);
+    vTaskDelay(pdMS_TO_TICKS(5000));
     pca9555_read_input(config_reg.port, 0);
     pca9555_read_input(config_reg.port, 1);
     i2c_driver_delete(EPDIY_I2C_PORT);
@@ -200,7 +202,7 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
     // Check if DISPLAY_UPSEQ_MC2 is set
     const EpdDisplay_t* display = epd_get_display();
     if (display->display_type & DISPLAY_UPSEQ_MC2) {
-        vTaskDelay(3);
+        vTaskDelay(pdMS_TO_TICKS(30));
         tps_set_upseq_carta1300();
     }
 
@@ -210,7 +212,7 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
     epd_board_set_ctrl(state, &mask);
 
     // give the IC time to powerup and set lines
-    vTaskDelay(1);
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     int tries = 0;
     while (!(pca9555_read_input(config_reg.port, 1) & CFG_PIN_PWRGOOD)) {
@@ -224,7 +226,7 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
             return false;
         }
         tries++;
-        vTaskDelay(1);
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     ESP_ERROR_CHECK(tps_write_register(config_reg.port, TPS_REG_ENABLE, 0x3F));
@@ -247,7 +249,7 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
             return false;
         }
         tries++;
-        vTaskDelay(1);
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
     return true;
 }
@@ -267,7 +269,7 @@ static void epd_board_measure_vcom(epd_ctrl_state_t* state) {
     epd_board_set_ctrl(state, &mask);
 
     // give the IC time to powerup and set lines
-    vTaskDelay(1);
+    vTaskDelay(pdMS_TO_TICKS(10));
     state->ep_sth = true;
     mask = (const epd_ctrl_state_t){
         .ep_sth = true,
@@ -295,7 +297,7 @@ static void epd_board_measure_vcom(epd_ctrl_state_t* state) {
             return;
         }
         tries++;
-        vTaskDelay(1);
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -311,7 +313,7 @@ static void epd_board_poweroff(epd_ctrl_state_t* state) {
     state->ep_output_enable = false;
     state->ep_mode = false;
     epd_board_set_ctrl(state, &mask);
-    vTaskDelay(1);
+    vTaskDelay(pdMS_TO_TICKS(10));
     config_reg.wakeup = false;
     epd_board_set_ctrl(state, &mask);
 
