@@ -15,6 +15,8 @@
 
 #include <driver/gpio.h>
 #include <driver/i2c.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <sdkconfig.h>
 
 // Make this compile on the ESP32 without ifdefing the whole file
@@ -157,7 +159,7 @@ static void epd_board_deinit() {
 
     // Not sure why we need this delay, but the TPS65185 seems to generate an interrupt after some
     // time that needs to be cleared.
-    vTaskDelay(50);
+    vTaskDelay(pdMS_TO_TICKS(500));
     i2c_driver_delete(EPDIY_I2C_PORT);
 
     gpio_uninstall_isr_service();
@@ -214,7 +216,7 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
     epd_board_set_ctrl(state, &mask);
 
     // give the IC time to powerup and set lines
-    vTaskDelay(1);
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     // Check if PWRs lines are up
     int timeout_counter = 0;
@@ -242,7 +244,7 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
             return false;
         }
         tries++;
-        vTaskDelay(1);
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
     return true;
 }
@@ -259,7 +261,7 @@ static void epd_board_poweroff(epd_ctrl_state_t* state) {
     state->ep_output_enable = false;
     state->ep_mode = false;
     epd_board_set_ctrl(state, &mask);
-    vTaskDelay(1);
+    vTaskDelay(pdMS_TO_TICKS(10));
     config_reg.wakeup = false;
     epd_board_set_ctrl(state, &mask);
 }
