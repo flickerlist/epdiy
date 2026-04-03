@@ -152,12 +152,12 @@ static void epd_board_deinit() {
             break;
         }
         tries++;
-        vTaskDelay(1);
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     // Not sure why we need this delay, but the TPS65185 seems to generate an interrupt after some
     // time that needs to be cleared.
-    vTaskDelay(50);
+    vTaskDelay(pdMS_TO_TICKS(500));
     pca9555_read_input(config_reg.port, 0);
     pca9555_read_input(config_reg.port, 1);
     i2c_driver_delete(EPDIY_I2C_PORT);
@@ -201,7 +201,7 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
     epd_board_set_ctrl(state, &mask);
 
     // give the IC time to powerup and set lines
-    vTaskDelay(1);
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     while (!(pca9555_read_input(config_reg.port, 1) & CFG_PIN_PWRGOOD)) {
     }
@@ -227,7 +227,7 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
             return false;
         }
         tries++;
-        vTaskDelay(1);
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
     return true;
 }
@@ -244,7 +244,7 @@ static void epd_board_poweroff(epd_ctrl_state_t* state) {
     state->ep_output_enable = false;
     state->ep_mode = false;
     epd_board_set_ctrl(state, &mask);
-    vTaskDelay(1);
+    vTaskDelay(pdMS_TO_TICKS(10));
     config_reg.wakeup = false;
     epd_board_set_ctrl(state, &mask);
 }
