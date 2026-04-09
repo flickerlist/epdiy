@@ -55,6 +55,45 @@ static inline bool IRAM_ATTR ready_prefix_committed(RenderContext_t* ctx, int li
     return true;
 }
 
+static inline bool IRAM_ATTR frame_started_load(RenderContext_t* ctx) {
+    return atomic_load_explicit(&ctx->frame_started, memory_order_acquire);
+}
+
+static inline int IRAM_ATTR lq_effective_capacity(LineQueue_t* queue) {
+    return queue->size - 1;
+}
+
+static inline int IRAM_ATTR lq_used(LineQueue_t* queue) {
+    int current = atomic_load_explicit(&queue->current, memory_order_acquire);
+    int last = atomic_load_explicit(&queue->last, memory_order_acquire);
+    int used = current - last;
+    if (used < 0) {
+        used += queue->size;
+    }
+    return used;
+}
+
+static inline void IRAM_ATTR maybe_start_frame(
+    RenderContext_t* ctx,
+    LineQueue_t* lq,
+    int startup_ready_target,
+    int minimum_ready_lines,
+    int prestart_queue_limit
+) {
+    if (frame_started_load(ctx)) {
+        return;
+    }
+
+    if (ready_prefix_committed(ctx, startup_ready_target)) {
+        try_start_frame_once(ctx);
+        return;
+    }
+
+    if (lq_used(lq) >= prestart_queue_limit && ready_prefix_committed(ctx, minimum_ready_lines)) {
+        try_start_frame_once(ctx);
+    }
+}
+
 __attribute__((optimize("O3"))) static bool IRAM_ATTR
 retrieve_line_isr(RenderContext_t* ctx, uint8_t* buf) {
     if (ctx->lines_consumed >= ctx->lines_total) {
@@ -227,11 +266,29 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
 
     assert(area.width == ctx->display_width && area.x == 0 && !ctx->error);
 
-    // index of the line that triggers the frame output when processed
-    // Start once we have enough lines to cover the two LCD bounce buffers.
-    int trigger_line = int_min(NUM_RENDER_THREADS * 4 - 1, max_y - min_y);
+    // Keep one slot per queue free before startup so producers cannot self-deadlock
+    // while we are still building a larger ready prefix.
+    int prestart_queue_limit = lq_effective_capacity(lq) - 1;
+    int minimum_ready_lines = int_min(NUM_RENDER_THREADS * 4, ctx->lines_total);
+    // Deeper queues are used to improve steady-state headroom, but we keep the
+    // startup prefetch target capped so larger queues do not delay frame start.
+    int startup_ready_target = int_min(prestart_queue_limit * NUM_RENDER_THREADS, 60);
+    startup_ready_target = int_min(startup_ready_target, ctx->lines_total);
 
-    while (l = atomic_fetch_add(&ctx->lines_prepared, 1), l < ctx->lines_total) {
+    while (true) {
+        if (!frame_started_load(ctx)) {
+            maybe_start_frame(ctx, lq, startup_ready_target, minimum_ready_lines, prestart_queue_limit);
+            if (!frame_started_load(ctx) && lq_used(lq) >= prestart_queue_limit) {
+                taskYIELD();
+                continue;
+            }
+        }
+
+        l = atomic_fetch_add(&ctx->lines_prepared, 1);
+        if (l >= ctx->lines_total) {
+            break;
+        }
+
         if (l < min_y || l >= max_y
             || (ctx->drawn_lines != NULL && !ctx->drawn_lines[l - area.y])) {
             uint8_t* buf = NULL;
@@ -243,14 +300,18 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
                     return;
                 };
 
+                if (!frame_started_load(ctx)) {
+                    maybe_start_frame(
+                        ctx, lq, startup_ready_target, minimum_ready_lines, prestart_queue_limit
+                    );
+                    taskYIELD();
+                }
                 buf = lq_current(lq);
             }
             memset(buf, 0x00, lq->element_size);
             lq_commit(lq);
             publish_line(ctx, l, thread_id);
-            if (l - min_y >= trigger_line && ready_prefix_committed(ctx, trigger_line + 1)) {
-                try_start_frame_once(ctx);
-            }
+            maybe_start_frame(ctx, lq, startup_ready_target, minimum_ready_lines, prestart_queue_limit);
             continue;
         }
 
@@ -270,6 +331,10 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
                 return;
             };
 
+            if (!frame_started_load(ctx)) {
+                maybe_start_frame(ctx, lq, startup_ready_target, minimum_ready_lines, prestart_queue_limit);
+                taskYIELD();
+            }
             buf = lq_current(lq);
         }
 
@@ -280,9 +345,7 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
 
         lq_commit(lq);
         publish_line(ctx, l, thread_id);
-        if (l - min_y >= trigger_line && ready_prefix_committed(ctx, trigger_line + 1)) {
-            try_start_frame_once(ctx);
-        }
+        maybe_start_frame(ctx, lq, startup_ready_target, minimum_ready_lines, prestart_queue_limit);
     }
 }
 
