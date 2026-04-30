@@ -283,6 +283,25 @@ enum EpdDrawError epd_hl_update_area(
 
     uint32_t t2 = esp_timer_get_time() / 1000;
 
+    if (err != EPD_DRAW_SUCCESS) {
+        if (mirror_x) {
+            epd_hl_mirror_framebuffer_horizontal(state->front_fb, epd_width(), epd_height());
+            epd_hl_mirror_framebuffer_horizontal(state->back_fb, epd_width(), epd_height());
+        }
+
+        ESP_LOGW(
+            "epdiy",
+            "draw failed: 0x%X, mirror: %dms, rot: %dms, diff: %dms, draw: %dms, total: %dms",
+            err,
+            tm1 - ts,
+            tr - tm1,
+            t1 - tr,
+            t2 - t1,
+            t2 - ts
+        );
+        return err;
+    }
+
     diff_area.x = 0;
     diff_area.y = 0;
     diff_area.width = epd_width();
