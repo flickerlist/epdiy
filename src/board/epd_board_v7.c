@@ -225,6 +225,7 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
     }
     config_reg.pwrup = true;
     epd_board_set_ctrl(state, &mask);
+    vTaskDelay(pdMS_TO_TICKS(10));
     config_reg.vcom_ctrl = true;
     epd_board_set_ctrl(state, &mask);
 
