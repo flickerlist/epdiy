@@ -11,7 +11,7 @@ const EpdDisplay_t ED060SCT = {
 
 const EpdDisplay_t ED060XC3 = {
     .width = 1024,
-    .height = 768,
+    .height = 758,
     .bus_width = 8,
     .bus_speed = 20,
     .default_waveform = &epdiy_ED060XC3,
