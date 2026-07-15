@@ -27,7 +27,27 @@
 
 static const int EPDIY_PCA9555_ADDR = 0x20;
 
+/**
+ * Read one input port using the legacy value-only API.
+ *
+ * This function logs an I2C error and returns zero, so callers cannot distinguish
+ * a valid all-low input from a failed transaction. Use
+ * pca9555_read_input_checked() for power-state decisions.
+ */
 uint8_t pca9555_read_input(i2c_port_t port, int high_port);
+
+/**
+ * Read one input port and preserve the I2C transaction result.
+ *
+ * @param port I2C controller used by the expander.
+ * @param high_port 0 selects port 0; 1 selects port 1.
+ * @param value Receives the input register value when the transaction succeeds.
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG for invalid arguments, or the
+ *         error returned by the ESP-IDF I2C driver.
+ */
+esp_err_t pca9555_read_input_checked(i2c_port_t port, int high_port, uint8_t* value);
+
+/** All write APIs return the underlying I2C transaction status. */
 esp_err_t pca9555_set_value(i2c_port_t port, uint8_t config_value, int high_port);
 esp_err_t pca9555_set_inversion(i2c_port_t port, uint8_t config_value, int high_port);
 esp_err_t pca9555_set_config(i2c_port_t port, uint8_t config_value, int high_port);

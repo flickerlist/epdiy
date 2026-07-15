@@ -220,7 +220,7 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
     if (display->display_type & DISPLAY_UPSEQ_MC2) {
         // Might need a bigger delay till TPS65185 fully wakes up
         vTaskDelay(pdMS_TO_TICKS(30));
-        tps_set_upseq_carta1300();
+        tps_set_upseq_carta1300(config_reg.port);
         printf("Setting UPSEQ for DISPLAY_UPSEQ_MC2\n");
     }
     config_reg.pwrup = true;

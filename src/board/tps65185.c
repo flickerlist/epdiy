@@ -12,19 +12,35 @@
 
 static const int EPDIY_TPS_ADDR = 0x68;
 
-static uint8_t i2c_master_read_slave(i2c_port_t i2c_num, int reg) {
-    uint8_t r_data[1];
+static esp_err_t i2c_master_read_slave(i2c_port_t i2c_num, int reg, uint8_t* value) {
+    if (value == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
+    // Phase 1 selects the register. Delete the command link before checking the
+    // transaction result so failed I2C operations cannot leak heap objects.
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    if (cmd == NULL) {
+        ESP_LOGE("epdiy", "insufficient memory for TPS65185 I2C transaction");
+        return ESP_ERR_NO_MEM;
+    }
     i2c_master_start(cmd);
     i2c_master_write_byte(cmd, (EPDIY_TPS_ADDR << 1) | I2C_MASTER_WRITE, true);
     i2c_master_write_byte(cmd, reg, true);
     i2c_master_stop(cmd);
 
-    ESP_ERROR_CHECK(i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_PERIOD_MS));
+    esp_err_t ret = i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_PERIOD_MS);
     i2c_cmd_link_delete(cmd);
+    if (ret != ESP_OK) {
+        return ret;
+    }
 
+    // Phase 2 reads the selected register and follows the same ownership rule.
     cmd = i2c_cmd_link_create();
+    if (cmd == NULL) {
+        ESP_LOGE("epdiy", "insufficient memory for TPS65185 I2C transaction");
+        return ESP_ERR_NO_MEM;
+    }
     i2c_master_start(cmd);
     i2c_master_write_byte(cmd, (EPDIY_TPS_ADDR << 1) | I2C_MASTER_READ, true);
     /*
@@ -32,19 +48,26 @@ static uint8_t i2c_master_read_slave(i2c_port_t i2c_num, int reg) {
         i2c_master_read(cmd, data_rd, size - 1, I2C_MASTER_ACK);
     }
     */
-    i2c_master_read_byte(cmd, r_data, I2C_MASTER_NACK);
+    i2c_master_read_byte(cmd, value, I2C_MASTER_NACK);
     i2c_master_stop(cmd);
 
-    ESP_ERROR_CHECK(i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_PERIOD_MS));
+    ret = i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_PERIOD_MS);
     i2c_cmd_link_delete(cmd);
-
-    return r_data[0];
+    return ret;
 }
 
 static esp_err_t i2c_master_write_slave(
     i2c_port_t i2c_num, uint8_t ctrl, uint8_t* data_wr, size_t size
 ) {
+    if (size > 0 && data_wr == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    if (cmd == NULL) {
+        ESP_LOGE("epdiy", "insufficient memory for TPS65185 I2C transaction");
+        return ESP_ERR_NO_MEM;
+    }
     i2c_master_start(cmd);
     i2c_master_write_byte(cmd, (EPDIY_TPS_ADDR << 1) | I2C_MASTER_WRITE, true);
     i2c_master_write_byte(cmd, ctrl, true);
@@ -67,20 +90,43 @@ esp_err_t tps_write_register(i2c_port_t port, int reg, uint8_t value) {
 }
 
 uint8_t tps_read_register(i2c_port_t i2c_num, int reg) {
-    return i2c_master_read_slave(i2c_num, reg);
+    // Keep the legacy API for existing callers. Power sequencing uses the
+    // checked API so a communication failure is never interpreted as value 0.
+    uint8_t value = 0;
+    esp_err_t err = tps_read_register_checked(i2c_num, reg, &value);
+    if (err != ESP_OK) {
+        ESP_LOGE("TPS65185", "%s failed: %s", __func__, esp_err_to_name(err));
+    }
+    return value;
 }
 
-void tps_set_vcom(i2c_port_t i2c_num, unsigned vcom_mV) {
+esp_err_t tps_read_register_checked(i2c_port_t i2c_num, int reg, uint8_t* value) {
+    return i2c_master_read_slave(i2c_num, reg, value);
+}
+
+esp_err_t tps_set_vcom(i2c_port_t i2c_num, unsigned vcom_mV) {
     unsigned val = vcom_mV / 10;
-    ESP_ERROR_CHECK(tps_write_register(i2c_num, 4, (val & 0x100) >> 8));
-    ESP_ERROR_CHECK(tps_write_register(i2c_num, 3, val & 0xFF));
+    esp_err_t err = tps_write_register(i2c_num, TPS_REG_VCOM2, (val & 0x100) >> 8);
+    if (err != ESP_OK) {
+        return err;
+    }
+    return tps_write_register(i2c_num, TPS_REG_VCOM1, val & 0xFF);
 }
 
 int8_t tps_read_thermistor(i2c_port_t i2c_num) {
-    tps_write_register(i2c_num, TPS_REG_TMST1, 0x80);
+    esp_err_t err = tps_write_register(i2c_num, TPS_REG_TMST1, 0x80);
+    if (err != ESP_OK) {
+        ESP_LOGE("epdiy", "thermistor start failed: %s", esp_err_to_name(err));
+        return 0;
+    }
     int tries = 0;
     while (true) {
-        uint8_t val = tps_read_register(i2c_num, TPS_REG_TMST1);
+        uint8_t val = 0;
+        err = tps_read_register_checked(i2c_num, TPS_REG_TMST1, &val);
+        if (err != ESP_OK) {
+            ESP_LOGE("epdiy", "thermistor status read failed: %s", esp_err_to_name(err));
+            return 0;
+        }
         // temperature conversion done
         if (val & 0x20) {
             break;
@@ -92,7 +138,13 @@ int8_t tps_read_thermistor(i2c_port_t i2c_num) {
             break;
         }
     }
-    return (int8_t)tps_read_register(i2c_num, TPS_REG_TMST_VALUE);
+    uint8_t value = 0;
+    err = tps_read_register_checked(i2c_num, TPS_REG_TMST_VALUE, &value);
+    if (err != ESP_OK) {
+        ESP_LOGE("epdiy", "thermistor value read failed: %s", esp_err_to_name(err));
+        return 0;
+    }
+    return (int8_t)value;
 }
 
 void tps_vcom_kickback() {
@@ -129,7 +181,10 @@ unsigned tps_vcom_kickback_rdy() {
     }
 }
 
-void tps_set_upseq_carta1300() {
-    tps_write_register(I2C_NUM_0, TPS_REG_UPSEQ0, 0xE1);
-    tps_write_register(I2C_NUM_0, TPS_REG_UPSEQ1, 0xAA);
+esp_err_t tps_set_upseq_carta1300(i2c_port_t i2c_num) {
+    esp_err_t err = tps_write_register(i2c_num, TPS_REG_UPSEQ0, 0xE1);
+    if (err != ESP_OK) {
+        return err;
+    }
+    return tps_write_register(i2c_num, TPS_REG_UPSEQ1, 0xAA);
 }

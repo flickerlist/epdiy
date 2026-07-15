@@ -203,7 +203,7 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
     const EpdDisplay_t* display = epd_get_display();
     if (display->display_type & DISPLAY_UPSEQ_MC2) {
         vTaskDelay(pdMS_TO_TICKS(30));
-        tps_set_upseq_carta1300();
+        tps_set_upseq_carta1300(config_reg.port);
     }
 
     config_reg.pwrup = true;

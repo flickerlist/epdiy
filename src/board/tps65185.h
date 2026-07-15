@@ -2,6 +2,7 @@
 #define TPS65185_H
 
 #include <driver/i2c.h>
+#include <esp_err.h>
 
 #define TPS_REG_TMST_VALUE 0x00
 #define TPS_REG_ENABLE 0x01
@@ -21,13 +22,35 @@
 #define TPS_REG_PG 0x0F
 #define TPS_REG_REVID 0x10
 
+/** Write a TPS65185 register and return the underlying I2C transaction status. */
 esp_err_t tps_write_register(i2c_port_t port, int reg, uint8_t value);
+
+/**
+ * Read a register using the legacy value-only API.
+ *
+ * This function logs an I2C error and returns zero. Use
+ * tps_read_register_checked() when zero is a meaningful register value.
+ */
 uint8_t tps_read_register(i2c_port_t i2c_num, int reg);
 
 /**
- * Sets the VCOM voltage in positive milivolts: 1600 -> -1.6V
+ * Read a TPS65185 register without collapsing an I2C failure into value zero.
+ *
+ * @param i2c_num I2C controller connected to the TPS65185.
+ * @param reg Register address to read.
+ * @param value Receives the register value when the transaction succeeds.
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG for a null output pointer, or
+ *         the error returned by the ESP-IDF I2C driver.
  */
-void tps_set_vcom(i2c_port_t i2c_num, unsigned vcom_mV);
+esp_err_t tps_read_register_checked(i2c_port_t i2c_num, int reg, uint8_t* value);
+
+/**
+ * Set the VCOM voltage in positive millivolts: 1600 means -1.6 V.
+ *
+ * @return ESP_OK when both VCOM registers are written, otherwise the first I2C
+ *         error encountered.
+ */
+esp_err_t tps_set_vcom(i2c_port_t i2c_num, unsigned vcom_mV);
 
 /**
  * @brief Please read datasheet section 8.3.7.1 Kick-Back Voltage Measurement
@@ -49,9 +72,15 @@ void tps_vcom_kickback_start();
 unsigned tps_vcom_kickback_rdy();
 
 /**
- * Sets a special power-up voltage sequence that is specific for Carta 1300 panels
+ * Set the power-up voltage sequence required by Carta 1300 panels.
+ *
+ * The caller supplies the board's I2C controller; v7 uses I2C_NUM_1 rather than
+ * the I2C_NUM_0 value used by older boards.
+ *
+ * @return ESP_OK when both sequence registers are written, otherwise the first
+ *         I2C error encountered.
  */
-void tps_set_upseq_carta1300();
+esp_err_t tps_set_upseq_carta1300(i2c_port_t i2c_num);
 /**
  * Read the temperature via the on-board thermistor.
  */

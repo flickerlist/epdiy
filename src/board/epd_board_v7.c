@@ -81,6 +81,9 @@ typedef struct {
 static int vcom = 1600;
 
 static epd_config_register_t config_reg;
+// Cleared after any expander communication failure. The next power-on attempt
+// then restores a known-safe output latch and pin-direction configuration.
+static bool expander_initialized = false;
 
 static bool interrupt_done = false;
 
@@ -112,6 +115,34 @@ static lcd_bus_config_t lcd_config = {
     .data[15] = D15,
 };
 
+/**
+ * Initialize the TCA9535 without exposing its power-on output-latch values.
+ *
+ * After POR all pins are inputs, but the output registers default to 0xFF.
+ * Writing the safe inactive levels before changing pin direction prevents
+ * WAKEUP, PWRUP, or VCOM from pulsing high during initialization or recovery.
+ */
+static esp_err_t epd_board_init_expander() {
+    expander_initialized = false;
+    config_reg.pwrup = false;
+    config_reg.vcom_ctrl = false;
+    config_reg.wakeup = false;
+
+    // Preload a safe low level while all pins are still inputs. This prevents the
+    // TCA9535 power-on output latch (0xFF) from briefly enabling the TPS65185.
+    esp_err_t err = pca9555_set_value(config_reg.port, 0x00, 1);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    // Set all EPD control lines to outputs except TPS interrupt and PWRGOOD.
+    err = pca9555_set_config(config_reg.port, CFG_PIN_PWRGOOD | CFG_PIN_INT, 1);
+    if (err == ESP_OK) {
+        expander_initialized = true;
+    }
+    return err;
+}
+
 static void epd_board_init(uint32_t epd_row_width) {
     gpio_hold_dis(CKH);  // free CKH after wakeup
 
@@ -123,6 +154,8 @@ static void epd_board_init(uint32_t epd_row_width) {
     conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
     conf.master.clk_speed = 100000;
     conf.clk_flags = 0;
+    // These calls configure the local ESP-IDF controller. Device transactions
+    // below propagate errors instead of aborting through ESP_ERROR_CHECK.
     ESP_ERROR_CHECK(i2c_param_config(EPDIY_I2C_PORT, &conf));
 
     ESP_ERROR_CHECK(i2c_driver_install(EPDIY_I2C_PORT, I2C_MODE_MASTER, 0, 0, 0));
@@ -142,8 +175,10 @@ static void epd_board_init(uint32_t epd_row_width) {
 
     ESP_ERROR_CHECK(gpio_isr_handler_add(CFG_INTR, interrupt_handler, (void*)CFG_INTR));
 
-    // set all epdiy lines to output except TPS interrupt + PWR good
-    ESP_ERROR_CHECK(pca9555_set_config(config_reg.port, CFG_PIN_PWRGOOD | CFG_PIN_INT, 1));
+    esp_err_t err = epd_board_init_expander();
+    if (err != ESP_OK) {
+        ESP_LOGE("epdiy", "TCA9535 initialization failed: %s", esp_err_to_name(err));
+    }
 
     const EpdDisplay_t* display = epd_get_display();
 
@@ -161,12 +196,24 @@ static void epd_board_init(uint32_t epd_row_width) {
 static void epd_board_deinit() {
     epd_lcd_deinit();
 
-    ESP_ERROR_CHECK(pca9555_set_config(
+    esp_err_t err = pca9555_set_config(
         config_reg.port, CFG_PIN_PWRGOOD | CFG_PIN_INT | CFG_PIN_VCOM_CTRL | CFG_PIN_PWRUP, 1
-    ));
+    );
+    if (err != ESP_OK) {
+        ESP_LOGE("epdiy", "TCA9535 deinit configuration failed: %s", esp_err_to_name(err));
+    }
 
     int tries = 0;
-    while (!((pca9555_read_input(config_reg.port, 1) & 0xC0) == 0x80)) {
+    uint8_t input = 0;
+    while (true) {
+        err = pca9555_read_input_checked(config_reg.port, 1, &input);
+        if (err != ESP_OK) {
+            ESP_LOGE("epdiy", "TCA9535 deinit status read failed: %s", esp_err_to_name(err));
+            break;
+        }
+        if ((input & 0xC0) == 0x80) {
+            break;
+        }
         if (tries >= 50) {
             ESP_LOGE("epdiy", "failed to shut down TPS65185!");
             break;
@@ -178,14 +225,23 @@ static void epd_board_deinit() {
     // Not sure why we need this delay, but the TPS65185 seems to generate an interrupt after some
     // time that needs to be cleared.
     vTaskDelay(pdMS_TO_TICKS(500));
-    pca9555_read_input(config_reg.port, 0);
-    pca9555_read_input(config_reg.port, 1);
+    err = pca9555_read_input_checked(config_reg.port, 0, &input);
+    if (err == ESP_OK) {
+        err = pca9555_read_input_checked(config_reg.port, 1, &input);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE("epdiy", "TCA9535 interrupt clear failed: %s", esp_err_to_name(err));
+    }
     i2c_driver_delete(EPDIY_I2C_PORT);
+    expander_initialized = false;
 
     gpio_uninstall_isr_service();
 }
 
-static void epd_board_set_ctrl(epd_ctrl_state_t* state, const epd_ctrl_state_t* const mask) {
+/** Checked internal form of the board callback used by power sequencing. */
+static esp_err_t epd_board_write_ctrl(
+    epd_ctrl_state_t* state, const epd_ctrl_state_t* const mask
+) {
     uint8_t value = 0x00;
     if (mask->ep_output_enable || mask->ep_mode || mask->ep_stv) {
         if (state->ep_output_enable)
@@ -200,9 +256,85 @@ static void epd_board_set_ctrl(epd_ctrl_state_t* state, const epd_ctrl_state_t* 
         if (config_reg.wakeup)
             value |= CFG_PIN_WAKEUP;
 
-        ESP_ERROR_CHECK(pca9555_set_value(config_reg.port, value, 1));
+        esp_err_t err = pca9555_set_value(config_reg.port, value, 1);
+        if (err != ESP_OK) {
+            expander_initialized = false;
+            ESP_LOGE("epdiy", "TCA9535 control write failed: %s", esp_err_to_name(err));
+        }
+        return err;
     }
+    return ESP_OK;
 }
+
+static void epd_board_set_ctrl(epd_ctrl_state_t* state, const epd_ctrl_state_t* const mask) {
+    // The public board callback has no error return. Log and remember failures in
+    // epd_board_write_ctrl(); checked power paths call that function directly.
+    (void)epd_board_write_ctrl(state, mask);
+}
+
+/** Disable VCOM and the power rails before taking the PMIC out of wake state. */
+static esp_err_t epd_board_poweroff_checked(epd_ctrl_state_t* state) {
+    epd_ctrl_state_t mask = {
+        .ep_stv = true,
+        .ep_output_enable = true,
+        .ep_mode = true,
+    };
+    config_reg.vcom_ctrl = false;
+    config_reg.pwrup = false;
+    state->ep_stv = false;
+    state->ep_output_enable = false;
+    state->ep_mode = false;
+
+    esp_err_t first_err = epd_board_write_ctrl(state, &mask);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    config_reg.wakeup = false;
+    esp_err_t second_err = epd_board_write_ctrl(state, &mask);
+    return first_err != ESP_OK ? first_err : second_err;
+}
+
+/** Apply the required WAKEUP -> PWRUP -> VCOM sequence with checked writes. */
+static esp_err_t epd_board_start_power_sequence(
+    epd_ctrl_state_t* state, const epd_ctrl_state_t* const mask
+) {
+    state->ep_stv = true;
+    state->ep_mode = false;
+    state->ep_output_enable = true;
+
+    config_reg.wakeup = true;
+    esp_err_t err = epd_board_write_ctrl(state, mask);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    const EpdDisplay_t* display = epd_get_display();
+    if (display->display_type & DISPLAY_UPSEQ_MC2) {
+        vTaskDelay(pdMS_TO_TICKS(30));
+        err = tps_set_upseq_carta1300(config_reg.port);
+        if (err != ESP_OK) {
+            return err;
+        }
+        ESP_LOGI("epdiy", "Setting UPSEQ for DISPLAY_UPSEQ_MC2");
+    }
+
+    config_reg.pwrup = true;
+    err = epd_board_write_ctrl(state, mask);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+    config_reg.vcom_ctrl = true;
+    err = epd_board_write_ctrl(state, mask);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    // Give the PMIC time to start its power-up sequence.
+    vTaskDelay(pdMS_TO_TICKS(10));
+    return ESP_OK;
+}
+
 static void epd_board_poweroff(epd_ctrl_state_t* state);
 static bool epd_board_poweron(epd_ctrl_state_t* state) {
     epd_ctrl_state_t mask = {
@@ -210,35 +342,44 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
         .ep_mode = true,
         .ep_stv = true,
     };
-    state->ep_stv = true;
-    state->ep_mode = false;
-    state->ep_output_enable = true;
-    config_reg.wakeup = true;
-    epd_board_set_ctrl(state, &mask);
 
-    // Check if DISPLAY_UPSEQ_MC2 is set
-    const EpdDisplay_t* display = epd_get_display();
-    if (display->display_type & DISPLAY_UPSEQ_MC2) {
-        vTaskDelay(pdMS_TO_TICKS(30));
-        tps_set_upseq_carta1300();
-        printf("Setting UPSEQ for DISPLAY_UPSEQ_MC2\n");
+    esp_err_t err = ESP_OK;
+    if (!expander_initialized) {
+        err = epd_board_init_expander();
+        if (err != ESP_OK) {
+            ESP_LOGE("epdiy", "TCA9535 recovery initialization failed: %s", esp_err_to_name(err));
+            return false;
+        }
     }
-    config_reg.pwrup = true;
-    epd_board_set_ctrl(state, &mask);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    config_reg.vcom_ctrl = true;
-    epd_board_set_ctrl(state, &mask);
 
-    // give the IC time to powerup and set lines
-    vTaskDelay(pdMS_TO_TICKS(10));
+    err = epd_board_start_power_sequence(state, &mask);
+    if (err != ESP_OK) {
+        ESP_LOGE("epdiy", "display power sequence write failed: %s", esp_err_to_name(err));
+        return false;
+    }
 
     int64_t start = esp_timer_get_time();
-    int64_t failed_count = 0;
-    while (!(pca9555_read_input(config_reg.port, 1) & CFG_PIN_PWRGOOD)) {
+    int failed_count = 0;
+    while (true) {
+        uint8_t input = 0;
+        err = pca9555_read_input_checked(config_reg.port, 1, &input);
+        if (err != ESP_OK) {
+            // A failed transaction is not a valid low PWRGOOD sample. Return the
+            // communication error path and force safe expander reinitialization.
+            expander_initialized = false;
+            ESP_LOGE("epdiy", "TCA9535 PWRGOOD read failed: %s", esp_err_to_name(err));
+            return false;
+        }
+        if (input & CFG_PIN_PWRGOOD) {
+            break;
+        }
+
+        // Only a successfully read low PWRGOOD value enters the timed PMIC retry
+        // path. This keeps electrical startup failures separate from I2C faults.
         int64_t _cur = esp_timer_get_time();
         if (_cur - start > 700 * 1000) { // 700ms
             start  = _cur;
-            failed_count ++;
+            failed_count++;
 
             if (failed_count >= 3) {
                 // poweron failed
@@ -247,36 +388,32 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
             }
             esp_rom_printf("\nepdiy epd_board_poweron failed [once], core: %d retry...\n", xPortGetCoreID());
 
-            /// retry poweron
-            
-            epd_board_poweroff(state);
-
-            // copy upper code of poweron
-            epd_ctrl_state_t mask = {
-                .ep_output_enable = true,
-                .ep_mode = true,
-                .ep_stv = true,
-            };
-            state->ep_stv = true;
-            state->ep_mode = false;
-            state->ep_output_enable = true;
-            config_reg.wakeup = true;
-            epd_board_set_ctrl(state, &mask);
-            config_reg.pwrup = true;
-            epd_board_set_ctrl(state, &mask);
-            config_reg.vcom_ctrl = true;
-            epd_board_set_ctrl(state, &mask);
-
-            // give the IC time to powerup and set lines
-            vTaskDelay(pdMS_TO_TICKS(10));
+            err = epd_board_poweroff_checked(state);
+            if (err != ESP_OK) {
+                ESP_LOGE("epdiy", "display poweroff retry failed: %s", esp_err_to_name(err));
+                return false;
+            }
+            err = epd_board_start_power_sequence(state, &mask);
+            if (err != ESP_OK) {
+                ESP_LOGE("epdiy", "display poweron retry failed: %s", esp_err_to_name(err));
+                return false;
+            }
         } else {
             vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
 
-    ESP_ERROR_CHECK(tps_write_register(config_reg.port, TPS_REG_ENABLE, 0x3F));
+    err = tps_write_register(config_reg.port, TPS_REG_ENABLE, 0x3F);
+    if (err != ESP_OK) {
+        ESP_LOGE("epdiy", "TPS65185 enable write failed: %s", esp_err_to_name(err));
+        return false;
+    }
 
-    tps_set_vcom(config_reg.port, vcom);
+    err = tps_set_vcom(config_reg.port, vcom);
+    if (err != ESP_OK) {
+        ESP_LOGE("epdiy", "TPS65185 VCOM write failed: %s", esp_err_to_name(err));
+        return false;
+    }
 
     state->ep_sth = true;
     mask = (const epd_ctrl_state_t){
@@ -285,13 +422,19 @@ static bool epd_board_poweron(epd_ctrl_state_t* state) {
     epd_board_set_ctrl(state, &mask);
 
     int tries = 0;
-    while (!((tps_read_register(config_reg.port, TPS_REG_PG) & 0xFA) == 0xFA)) {
+    uint8_t pg_status = 0;
+    while (true) {
+        err = tps_read_register_checked(config_reg.port, TPS_REG_PG, &pg_status);
+        if (err != ESP_OK) {
+            // Do not treat an unreadable PG register as power rails being low.
+            ESP_LOGE("epdiy", "TPS65185 PG read failed: %s", esp_err_to_name(err));
+            return false;
+        }
+        if ((pg_status & 0xFA) == 0xFA) {
+            break;
+        }
         if (tries >= 500) {
-            ESP_LOGE(
-                "epdiy",
-                "Power enable failed! PG status: %X",
-                tps_read_register(config_reg.port, TPS_REG_PG)
-            );
+            ESP_LOGE("epdiy", "Power enable failed! PG status: %X", pg_status);
             return false;
         }
         tries++;
@@ -309,10 +452,26 @@ static void epd_board_measure_vcom(epd_ctrl_state_t* state) {
     state->ep_stv = true;
     state->ep_mode = false;
     state->ep_output_enable = true;
+
+    esp_err_t err = ESP_OK;
+    if (!expander_initialized) {
+        err = epd_board_init_expander();
+        if (err != ESP_OK) {
+            ESP_LOGE("epdiy", "TCA9535 measurement initialization failed: %s", esp_err_to_name(err));
+            return;
+        }
+    }
+
     config_reg.wakeup = true;
-    epd_board_set_ctrl(state, &mask);
+    err = epd_board_write_ctrl(state, &mask);
+    if (err != ESP_OK) {
+        return;
+    }
     config_reg.pwrup = true;
-    epd_board_set_ctrl(state, &mask);
+    err = epd_board_write_ctrl(state, &mask);
+    if (err != ESP_OK) {
+        return;
+    }
 
     // give the IC time to powerup and set lines
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -320,9 +479,27 @@ static void epd_board_measure_vcom(epd_ctrl_state_t* state) {
     mask = (const epd_ctrl_state_t){
         .ep_sth = true,
     };
-    epd_board_set_ctrl(state, &mask);
+    if (epd_board_write_ctrl(state, &mask) != ESP_OK) {
+        return;
+    }
 
-    while (!(pca9555_read_input(config_reg.port, 1) & CFG_PIN_PWRGOOD)) {
+    int tries = 0;
+    uint8_t input = 0;
+    while (true) {
+        err = pca9555_read_input_checked(config_reg.port, 1, &input);
+        if (err != ESP_OK) {
+            expander_initialized = false;
+            ESP_LOGE("epdiy", "TCA9535 measurement PWRGOOD read failed: %s", esp_err_to_name(err));
+            return;
+        }
+        if (input & CFG_PIN_PWRGOOD) {
+            break;
+        }
+        if (tries++ >= 500) {
+            ESP_LOGE("epdiy", "measurement PWRGOOD timeout");
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
     ESP_LOGI("epdiy", "Power rails enabled");
 
@@ -330,16 +507,23 @@ static void epd_board_measure_vcom(epd_ctrl_state_t* state) {
     mask = (const epd_ctrl_state_t){
         .ep_sth = true,
     };
-    epd_board_set_ctrl(state, &mask);
+    if (epd_board_write_ctrl(state, &mask) != ESP_OK) {
+        return;
+    }
 
-    int tries = 0;
-    while (!((tps_read_register(config_reg.port, TPS_REG_PG) & 0xFA) == 0xFA)) {
+    tries = 0;
+    uint8_t pg_status = 0;
+    while (true) {
+        err = tps_read_register_checked(config_reg.port, TPS_REG_PG, &pg_status);
+        if (err != ESP_OK) {
+            ESP_LOGE("epdiy", "TPS65185 measurement PG read failed: %s", esp_err_to_name(err));
+            return;
+        }
+        if ((pg_status & 0xFA) == 0xFA) {
+            break;
+        }
         if (tries >= 500) {
-            ESP_LOGE(
-                "epdiy",
-                "Power enable failed! PG status: %X",
-                tps_read_register(config_reg.port, TPS_REG_PG)
-            );
+            ESP_LOGE("epdiy", "Power enable failed! PG status: %X", pg_status);
             return;
         }
         tries++;
@@ -348,20 +532,10 @@ static void epd_board_measure_vcom(epd_ctrl_state_t* state) {
 }
 
 static void epd_board_poweroff(epd_ctrl_state_t* state) {
-    epd_ctrl_state_t mask = {
-        .ep_stv = true,
-        .ep_output_enable = true,
-        .ep_mode = true,
-    };
-    config_reg.vcom_ctrl = false;
-    config_reg.pwrup = false;
-    state->ep_stv = false;
-    state->ep_output_enable = false;
-    state->ep_mode = false;
-    epd_board_set_ctrl(state, &mask);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    config_reg.wakeup = false;
-    epd_board_set_ctrl(state, &mask);
+    esp_err_t err = epd_board_poweroff_checked(state);
+    if (err != ESP_OK) {
+        ESP_LOGE("epdiy", "display poweroff failed: %s", esp_err_to_name(err));
+    }
 }
 
 static float epd_board_ambient_temperature() {

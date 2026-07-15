@@ -18,13 +18,22 @@
 #define REG_CONFIG_PORT0 6
 #define REG_CONFIG_PORT1 7
 
-static esp_err_t i2c_master_read_slave(i2c_port_t i2c_num, uint8_t* data_rd, size_t size, int reg) {
+static esp_err_t i2c_master_read_slave(
+    i2c_port_t i2c_num, uint8_t* data_rd, size_t size, int reg
+) {
     if (size == 0) {
         return ESP_OK;
     }
+    if (data_rd == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Phase 1 selects the register. Keep the command-link lifetime local to this
+    // phase so every return path releases it before reporting an I2C error.
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     if (cmd == NULL) {
         ESP_LOGE("epdiy", "insufficient memory for I2C transaction");
+        return ESP_ERR_NO_MEM;
     }
     i2c_master_start(cmd);
     i2c_master_write_byte(cmd, (EPDIY_PCA9555_ADDR << 1) | I2C_MASTER_WRITE, true);
@@ -32,14 +41,17 @@ static esp_err_t i2c_master_read_slave(i2c_port_t i2c_num, uint8_t* data_rd, siz
     i2c_master_stop(cmd);
 
     esp_err_t ret = i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_PERIOD_MS);
+    i2c_cmd_link_delete(cmd);
     if (ret != ESP_OK) {
         return ret;
     }
-    i2c_cmd_link_delete(cmd);
 
+    // Phase 2 reads the selected register. The command link is deleted
+    // immediately after execution, regardless of the transaction result.
     cmd = i2c_cmd_link_create();
     if (cmd == NULL) {
         ESP_LOGE("epdiy", "insufficient memory for I2C transaction");
+        return ESP_ERR_NO_MEM;
     }
     i2c_master_start(cmd);
     i2c_master_write_byte(cmd, (EPDIY_PCA9555_ADDR << 1) | I2C_MASTER_READ, true);
@@ -50,10 +62,10 @@ static esp_err_t i2c_master_read_slave(i2c_port_t i2c_num, uint8_t* data_rd, siz
     i2c_master_stop(cmd);
 
     ret = i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_PERIOD_MS);
+    i2c_cmd_link_delete(cmd);
     if (ret != ESP_OK) {
         return ret;
     }
-    i2c_cmd_link_delete(cmd);
 
     return ESP_OK;
 }
@@ -61,9 +73,14 @@ static esp_err_t i2c_master_read_slave(i2c_port_t i2c_num, uint8_t* data_rd, siz
 static esp_err_t i2c_master_write_slave(
     i2c_port_t i2c_num, uint8_t ctrl, uint8_t* data_wr, size_t size
 ) {
+    if (size > 0 && data_wr == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     if (cmd == NULL) {
         ESP_LOGE("epdiy", "insufficient memory for I2C transaction");
+        return ESP_ERR_NO_MEM;
     }
     i2c_master_start(cmd);
     i2c_master_write_byte(cmd, (EPDIY_PCA9555_ADDR << 1) | I2C_MASTER_WRITE, true);
@@ -94,14 +111,20 @@ esp_err_t pca9555_set_value(i2c_port_t port, uint8_t config_value, int high_port
 }
 
 uint8_t pca9555_read_input(i2c_port_t i2c_port, int high_port) {
-    esp_err_t err;
-    uint8_t r_data[1];
-
-    err = i2c_master_read_slave(i2c_port, r_data, 1, REG_INPUT_PORT0 + high_port);
+    // Retain the historical value-only API for existing boards. New control
+    // paths must use the checked API below to distinguish zero from I2C failure.
+    uint8_t value = 0;
+    esp_err_t err = pca9555_read_input_checked(i2c_port, high_port, &value);
     if (err != ESP_OK) {
-        ESP_LOGE("PCA9555", "%s failed", __func__);
-        return 0;
+        ESP_LOGE("PCA9555", "%s failed: %s", __func__, esp_err_to_name(err));
+    }
+    return value;
+}
+
+esp_err_t pca9555_read_input_checked(i2c_port_t i2c_port, int high_port, uint8_t* value) {
+    if (value == NULL || (high_port != 0 && high_port != 1)) {
+        return ESP_ERR_INVALID_ARG;
     }
 
-    return r_data[0];
+    return i2c_master_read_slave(i2c_port, value, 1, REG_INPUT_PORT0 + high_port);
 }
