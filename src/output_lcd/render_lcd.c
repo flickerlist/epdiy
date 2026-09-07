@@ -75,21 +75,16 @@ static inline int IRAM_ATTR lq_used(LineQueue_t* queue) {
 
 static inline void IRAM_ATTR maybe_start_frame(
     RenderContext_t* ctx,
-    LineQueue_t* lq,
-    int startup_ready_target,
-    int minimum_ready_lines,
-    int prestart_queue_limit
+    int startup_ready_target
 ) {
     if (frame_started_load(ctx)) {
         return;
     }
 
+    // lines_prepared 统计已领取的计算任务，单个生产队列接近满也不代表连续行已就绪。
+    // 必须等目标前缀中的所有行都发布后再启动，否则 LCD 可能读到尚未完成的行，
+    // 导致供数不足；这里不再允许仅凭少量就绪行提前启动。
     if (ready_prefix_committed(ctx, startup_ready_target)) {
-        try_start_frame_once(ctx);
-        return;
-    }
-
-    if (lq_used(lq) >= prestart_queue_limit && ready_prefix_committed(ctx, minimum_ready_lines)) {
         try_start_frame_once(ctx);
     }
 }
@@ -266,18 +261,15 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
 
     assert(area.width == ctx->display_width && area.x == 0 && !ctx->error);
 
-    // Keep one slot per queue free before startup so producers cannot self-deadlock
-    // while we are still building a larger ready prefix.
+    // 启动前每个队列预留一个空位，避免构建连续就绪前缀时生产任务因队列满而相互等待。
     int prestart_queue_limit = lq_effective_capacity(lq) - 1;
-    int minimum_ready_lines = int_min(NUM_RENDER_THREADS * 4, ctx->lines_total);
-    // Deeper queues are used to improve steady-state headroom, but we keep the
-    // startup prefetch target capped so larger queues do not delay frame start.
+    // 较深的队列用于维持输出时的供数余量；启动预取仍最多等待 60 行，避免队列变大拖慢启动。
     int startup_ready_target = int_min(prestart_queue_limit * NUM_RENDER_THREADS, 60);
     startup_ready_target = int_min(startup_ready_target, ctx->lines_total);
 
     while (true) {
         if (!frame_started_load(ctx)) {
-            maybe_start_frame(ctx, lq, startup_ready_target, minimum_ready_lines, prestart_queue_limit);
+            maybe_start_frame(ctx, startup_ready_target);
             if (!frame_started_load(ctx) && lq_used(lq) >= prestart_queue_limit) {
                 taskYIELD();
                 continue;
@@ -301,9 +293,7 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
                 };
 
                 if (!frame_started_load(ctx)) {
-                    maybe_start_frame(
-                        ctx, lq, startup_ready_target, minimum_ready_lines, prestart_queue_limit
-                    );
+                    maybe_start_frame(ctx, startup_ready_target);
                     taskYIELD();
                 }
                 buf = lq_current(lq);
@@ -311,7 +301,7 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
             memset(buf, 0x00, lq->element_size);
             lq_commit(lq);
             publish_line(ctx, l, thread_id);
-            maybe_start_frame(ctx, lq, startup_ready_target, minimum_ready_lines, prestart_queue_limit);
+            maybe_start_frame(ctx, startup_ready_target);
             continue;
         }
 
@@ -332,12 +322,11 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
             };
 
             if (!frame_started_load(ctx)) {
-                maybe_start_frame(ctx, lq, startup_ready_target, minimum_ready_lines, prestart_queue_limit);
+                maybe_start_frame(ctx, startup_ready_target);
                 taskYIELD();
             }
             buf = lq_current(lq);
         }
-
         ctx->lut_lookup_func(lp, buf, ctx->conversion_lut, ctx->display_width);
 
         // apply the line mask
@@ -345,7 +334,7 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
 
         lq_commit(lq);
         publish_line(ctx, l, thread_id);
-        maybe_start_frame(ctx, lq, startup_ready_target, minimum_ready_lines, prestart_queue_limit);
+        maybe_start_frame(ctx, startup_ready_target);
     }
 }
 
