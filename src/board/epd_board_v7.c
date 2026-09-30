@@ -293,6 +293,14 @@ static esp_err_t epd_board_poweroff_checked(epd_ctrl_state_t* state) {
     return first_err != ESP_OK ? first_err : second_err;
 }
 
+/** Add support for HuiKe displays. */
+static esp_err_t epd_board_set_powerup_order() {
+    // TPS65185 requires >=1.8 ms from WAKEUP rising to the first I2C access.
+    esp_rom_delay_us(2000);
+    // Huike Power-up sequence: VEE/VGL -> VNEG/VSL -> VPOS/VSH -> VDDH/VGH. Leave other registers alone.
+    return tps_write_register(config_reg.port, TPS_REG_UPSEQ0, 0xE1);
+}
+
 /** Apply the required WAKEUP -> PWRUP -> VCOM sequence with checked writes. */
 static esp_err_t epd_board_start_power_sequence(
     epd_ctrl_state_t* state, const epd_ctrl_state_t* const mask
@@ -315,6 +323,11 @@ static esp_err_t epd_board_start_power_sequence(
             return err;
         }
         ESP_LOGI("epdiy", "Setting UPSEQ for DISPLAY_UPSEQ_MC2");
+    }
+
+    err = epd_board_set_powerup_order();
+    if (err != ESP_OK) {
+        return err;
     }
 
     config_reg.pwrup = true;
@@ -467,6 +480,11 @@ static void epd_board_measure_vcom(epd_ctrl_state_t* state) {
     if (err != ESP_OK) {
         return;
     }
+    err = epd_board_set_powerup_order();
+    if (err != ESP_OK) {
+        return;
+    }
+
     config_reg.pwrup = true;
     err = epd_board_write_ctrl(state, &mask);
     if (err != ESP_OK) {
