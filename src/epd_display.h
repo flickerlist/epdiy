@@ -37,6 +37,7 @@ typedef struct {
 
 extern const EpdDisplay_t ED060SCT;
 extern const EpdDisplay_t ED060XC3;
+extern const EpdDisplay_t ED060XC3_2;
 extern const EpdDisplay_t ENS060XCD;
 extern const EpdDisplay_t ED097OC4;
 extern const EpdDisplay_t ED097TC2;
