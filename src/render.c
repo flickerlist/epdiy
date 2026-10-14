@@ -56,20 +56,21 @@ void epd_push_pixels(EpdRect area, short time, int color) {
 ///////////////////////////// Coordination ///////////////////////////////
 
 /**
- * Find the waveform temperature range index for a given temperature in °C.
- * If no range in the waveform data fits the given temperature, return the
- * closest one.
- * Returns -1 if the waveform does not contain any temperature range.
+ * Find the waveform temperature range for a temperature in °C.
+ * Clamp temperatures outside the exported range to the nearest range.
+ * Return -1 if the waveform has no temperature ranges.
  */
 int waveform_temp_range_index(const EpdWaveform* waveform, int temperature) {
-    int idx = 0;
-    if (waveform->num_temp_ranges == 0) {
+    if (waveform == NULL || waveform->num_temp_ranges == 0) {
         return -1;
     }
-    while (idx < waveform->num_temp_ranges - 1 && waveform->temp_intervals[idx].min < temperature) {
-        idx++;
+
+    int index = 0;
+    while (index < waveform->num_temp_ranges - 1 &&
+           temperature >= waveform->temp_intervals[index].max) {
+        ++index;
     }
-    return idx;
+    return index;
 }
 
 static int get_waveform_index(const EpdWaveform* waveform, enum EpdDrawMode mode) {
