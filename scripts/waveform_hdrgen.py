@@ -82,11 +82,8 @@ mode_filter = [m for m in mode_filter if any([wm["mode"] == m for wm in waveform
 
 num_modes = len(mode_filter)
 
-temp_intervals = []
-for bounds in waveforms["temperature_ranges"]["range_bounds"]:
-    if bounds["to"] < tmin or bounds["from"] > tmax:
-        continue
-    temp_intervals.append(f"{{ .min = {bounds['from']}, .max = {bounds['to']} }}")
+source_intervals = waveforms["temperature_ranges"]["range_bounds"]
+selected_range_indices = None
 
 modes = []
 num_ranges = -1
@@ -96,10 +93,13 @@ for m_index, mode in enumerate(waveforms["modes"]):
         continue
 
     ranges = []
-    for i, r in enumerate(mode["ranges"]):
-        bounds = waveforms["temperature_ranges"]["range_bounds"][i]
+    range_indices = []
+    for r in mode["ranges"]:
+        source_index = r["index"]
+        bounds = source_intervals[source_index]
         if bounds["to"] < tmin or bounds["from"] > tmax:
             continue
+        range_indices.append(source_index)
 
         phases = []
         phase_count = len(r["phases"])
@@ -121,6 +121,8 @@ for m_index, mode in enumerate(waveforms["modes"]):
         ranges.append(name)
 
     assert(num_ranges < 0 or num_ranges == len(ranges))
+    assert(selected_range_indices is None or selected_range_indices == range_indices)
+    selected_range_indices = range_indices
 
     num_ranges = len(ranges)
     name = f"epd_wm_{args.name}_{mode['mode']}"
@@ -130,7 +132,11 @@ for m_index, mode in enumerate(waveforms["modes"]):
     modes.append(name)
 
 mode_pointers = ','.join(['&' + n for n in modes])
-range_data = ",".join(temp_intervals)
+temp_intervals = [source_intervals[i] for i in (selected_range_indices or [])]
+range_data = ",".join(
+    f"{{ .min = {bounds['from']}, .max = {bounds['to']} }}"
+    for bounds in temp_intervals
+)
 
 print(f"const EpdWaveformTempInterval {args.name}_intervals[{len(temp_intervals)}] = {{ {range_data} }};");
 print(f"const EpdWaveformMode* {args.name}_modes[{num_modes}] = {{ {mode_pointers} }};");

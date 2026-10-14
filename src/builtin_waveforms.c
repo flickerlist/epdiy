@@ -5,6 +5,7 @@
 // Note: Alternative Waveform added by Lilygo on Oct 2021, size: 266 Kb (ED047TC1 is 37 Kb, 7 times
 // smaller)
 #include "waveforms/epdiy_ED047TC2.h"
+#include "waveforms/epdiy_ENS060XCD.h"
 
 #include "waveforms/epdiy_ED060SC4.h"
 #include "waveforms/epdiy_ED060SCT.h"
