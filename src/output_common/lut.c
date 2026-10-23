@@ -290,7 +290,7 @@ __attribute__((optimize("O3"))) void IRAM_ATTR calc_epd_input_2ppB_1k_lut_black(
  */
 __attribute__((optimize("O3"))) static void IRAM_ATTR
 build_2ppB_lut_1k(uint8_t* lut, const EpdWaveformPhases* phases, int frame) {
-    const uint8_t* p_lut = phases->luts + (16 * 4 * frame);
+    const uint8_t* p_lut = epd_waveform_lut(phases, frame);
     for (uint8_t to = 0; to < 16; to++) {
         for (uint8_t from_packed = 0; from_packed < 4; from_packed++) {
             uint8_t index = (to << 4) | (from_packed * 4);
@@ -319,7 +319,7 @@ build_2ppB_lut_1k(uint8_t* lut, const EpdWaveformPhases* phases, int frame) {
  */
 __attribute__((optimize("O3"))) static void IRAM_ATTR
 build_1ppB_lut_64k(uint8_t* lut, const EpdWaveformPhases* phases, int frame) {
-    const uint8_t* p_lut = phases->luts + (16 * 4 * frame);
+    const uint8_t* p_lut = epd_waveform_lut(phases, frame);
     for (uint8_t to = 0; to < 16; to++) {
         for (uint8_t from_packed = 0; from_packed < 4; from_packed++) {
             uint8_t index = (to << 4) | (from_packed * 4);
@@ -352,7 +352,7 @@ build_1ppB_lut_64k(uint8_t* lut, const EpdWaveformPhases* phases, int frame) {
 __attribute__((optimize("O3"))) static void IRAM_ATTR
 build_1ppB_lut_S3_VE_1k(uint8_t* lut, const EpdWaveformPhases* phases, int frame) {
     uint32_t* lut32 = (uint32_t*)lut;
-    const uint8_t* p_lut = phases->luts + (16 * 4 * frame);
+    const uint8_t* p_lut = epd_waveform_lut(phases, frame);
     for (uint8_t to = 0; to < 16; to++) {
         for (uint8_t from_packed = 0; from_packed < 4; from_packed++) {
             uint8_t index = (to << 4) | (from_packed * 4);
@@ -373,7 +373,7 @@ build_1ppB_lut_S3_VE_1k(uint8_t* lut, const EpdWaveformPhases* phases, int frame
 __attribute__((optimize("O3"))) static void build_2ppB_lut_64k_static_from(
     uint8_t* lut, const EpdWaveformPhases* phases, uint8_t from, int frame
 ) {
-    const uint8_t* p_lut = phases->luts + (16 * 4 * frame);
+    const uint8_t* p_lut = epd_waveform_lut(phases, frame);
 
     /// index into the packed "from" row
     uint8_t fi = from >> 2;

@@ -26,7 +26,16 @@ typedef struct {
     /// phases, this is an array of the on-times for each phase.
     /// Otherwise, this is NULL.
     const int* phase_times;
+    /// 可选的 64 字节阶段索引；NULL 表示 luts 仍为原来的连续阶段数据。
+    /// 有索引时 luts 指向共享字典，重复阶段只共享存储，执行次数和时长不变。
+    const uint16_t* phase_indices;
 } EpdWaveformPhases;
+
+/// 每个阶段构建 LUT 时查一次字典，不在像素输出循环中解压。
+static inline const uint8_t* epd_waveform_lut(const EpdWaveformPhases* phases, int frame) {
+    const uint32_t index = phases->phase_indices ? phases->phase_indices[frame] : (uint32_t)frame;
+    return phases->luts + index * 64;
+}
 
 typedef struct {
     uint8_t type;
